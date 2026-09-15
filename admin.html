@@ -305,6 +305,14 @@ Interactive GIS Map
 
 </div>
 
+<div class="map-controls">
+    <button type="button" class="add-btn" id="useCurrentLocationBtn">
+        <i class="fa-solid fa-location-crosshairs"></i>
+        Use My GPS Location
+    </button>
+    <span id="gpsAccuracy" aria-live="polite"></span>
+</div>
+
 </section>
 
 <!-- ======================
@@ -316,22 +324,21 @@ GIS DETAILS
     <div class="coordinate-card">
 
         <h3>
-            <i class="fa-solid fa-location-crosshairs"></i>
-            Current Map Coordinates
+            <i class="fa-solid fa-id-card"></i>
+            Burial Information
         </h3>
 
-        <p><strong>Latitude:</strong> <span id="adminLatitude">14.954621</span></p>
-        <p><strong>Longitude:</strong> <span id="adminLongitude">120.896542</span></p>
+        <p><strong>Deceased Name:</strong> <span id="adminBurialName">No burial selected</span></p>
+        <p><strong>Block:</strong> <span id="adminBurialBlock">-</span></p>
+        <p><strong>Plot Number:</strong> <span id="adminBurialPlot">-</span></p>
+        <p><strong>Date of Burial:</strong> <span id="adminBurialDate">-</span></p>
+        <p><strong>Status:</strong> <span id="adminBurialStatus">-</span></p>
 
-        <button type="button" class="add-btn" id="useCurrentLocationBtn">
-            <i class="fa-solid fa-location-crosshairs"></i>
-            Use My GPS Location
+        <button type="button" class="add-btn" id="adminNavigateToGraveBtn">
+            <i class="fa-solid fa-route"></i>
+            Navigate to Grave
         </button>
-        <p id="gpsAccuracy" aria-live="polite"></p>
-
-        <span>
-            Coordinates automatically update as the administrator navigates the GIS map.
-        </span>
+        <p id="adminNavigationStatus" aria-live="polite"></p>
 
     </div>
 

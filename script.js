@@ -280,6 +280,8 @@ let currentMarker = null;
 let userGpsMarker = null;
 let selectedBurialRecord = null;
 let navigationRouteLayer = null;
+let selectedAdminBurialRecord = null;
+let adminNavigationRouteLayer = null;
 let adminMap = null;
 let adminMarker = null;
 let adminGpsMarker = null;
@@ -759,6 +761,20 @@ function focusAdminRecord(record) {
         return;
     }
 
+    selectedAdminBurialRecord = record;
+
+    const burialNameElement = document.getElementById("adminBurialName");
+    const burialBlockElement = document.getElementById("adminBurialBlock");
+    const burialPlotElement = document.getElementById("adminBurialPlot");
+    const burialDateElement = document.getElementById("adminBurialDate");
+    const burialStatusElement = document.getElementById("adminBurialStatus");
+
+    if (burialNameElement) burialNameElement.textContent = record.name || "Available Plot";
+    if (burialBlockElement) burialBlockElement.textContent = record.block || "-";
+    if (burialPlotElement) burialPlotElement.textContent = record.plot || "-";
+    if (burialDateElement) burialDateElement.textContent = record.date || "-";
+    if (burialStatusElement) burialStatusElement.textContent = record.status || "-";
+
     if (adminMarker) {
         adminMarker.setLatLng([record.lat, record.lng]);
         adminMarker.bindPopup(`<strong>${record.name}</strong><br>${record.block} • Plot ${record.plot}`);
@@ -953,6 +969,78 @@ function navigateToSelectedGrave() {
             const routeCoordinates = route.geometry.coordinates.map(([longitude, latitude]) => [latitude, longitude]);
             navigationRouteLayer = L.polyline(routeCoordinates, { color: "#d97706", weight: 6, opacity: 0.85 }).addTo(cemeteryMap);
             cemeteryMap.fitBounds(navigationRouteLayer.getBounds(), { padding: [30, 30] });
+
+            const distanceKm = (route.distance / 1000).toFixed(2);
+            const durationMinutes = Math.max(1, Math.round(route.duration / 60));
+            if (statusElement) statusElement.textContent = `Route to ${record.name || "the grave"}: ${distanceKm} km, about ${durationMinutes} min walking. GPS accuracy: ${Math.round(position.coords.accuracy)} m.`;
+        } catch (error) {
+            if (statusElement) statusElement.textContent = `Unable to create walking route: ${error.message}`;
+        } finally {
+            if (navigateButton) {
+                navigateButton.disabled = false;
+                navigateButton.innerHTML = '<i class="fa-solid fa-route"></i> Navigate to Grave';
+            }
+        }
+    }, (error) => {
+        if (statusElement) statusElement.textContent = `Unable to get location: ${error.message}`;
+        if (navigateButton) {
+            navigateButton.disabled = false;
+            navigateButton.innerHTML = '<i class="fa-solid fa-route"></i> Navigate to Grave';
+        }
+    }, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+    });
+}
+
+function navigateToSelectedAdminGrave() {
+    const statusElement = document.getElementById("adminNavigationStatus");
+    const navigateButton = document.getElementById("adminNavigateToGraveBtn");
+    const record = selectedAdminBurialRecord;
+
+    if (!record || !Number.isFinite(Number(record.lat)) || !Number.isFinite(Number(record.lng))) {
+        if (statusElement) statusElement.textContent = "Search for a grave with saved coordinates first.";
+        return;
+    }
+
+    if (!navigator.geolocation) {
+        if (statusElement) statusElement.textContent = "GPS is not available in this browser.";
+        return;
+    }
+
+    if (navigateButton) {
+        navigateButton.disabled = true;
+        navigateButton.textContent = "Finding your location...";
+    }
+    if (statusElement) statusElement.textContent = "Getting your current location...";
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+        const startLatitude = position.coords.latitude;
+        const startLongitude = position.coords.longitude;
+        const endLatitude = Number(record.lat);
+        const endLongitude = Number(record.lng);
+
+        if (adminGpsMarker) {
+            adminGpsMarker.setLatLng([startLatitude, startLongitude]);
+        } else {
+            adminGpsMarker = L.marker([startLatitude, startLongitude])
+                .addTo(adminMap)
+                .bindPopup("Your current location");
+        }
+
+        try {
+            const routeUrl = `https://router.project-osrm.org/route/v1/foot/${startLongitude},${startLatitude};${endLongitude},${endLatitude}?overview=full&geometries=geojson&steps=true`;
+            const response = await fetch(routeUrl);
+            const routeData = await response.json();
+            const route = routeData.routes && routeData.routes[0];
+
+            if (!route) throw new Error("No walking route was found.");
+            if (adminNavigationRouteLayer) adminMap.removeLayer(adminNavigationRouteLayer);
+
+            const routeCoordinates = route.geometry.coordinates.map(([longitude, latitude]) => [latitude, longitude]);
+            adminNavigationRouteLayer = L.polyline(routeCoordinates, { color: "#d97706", weight: 6, opacity: 0.85 }).addTo(adminMap);
+            adminMap.fitBounds(adminNavigationRouteLayer.getBounds(), { padding: [30, 30] });
 
             const distanceKm = (route.distance / 1000).toFixed(2);
             const durationMinutes = Math.max(1, Math.round(route.duration / 60));
@@ -1705,6 +1793,15 @@ function initializeAdminDashboard() {
     const form = document.getElementById("addBurialRecordForm");
     const searchInput = document.getElementById("adminSearchInput");
     const notificationButton = document.getElementById("notificationButton");
+    const navigateButton = document.getElementById("adminNavigateToGraveBtn");
+
+    if (navigateButton) {
+        navigateButton.addEventListener("click", navigateToSelectedAdminGrave);
+    }
+
+    if (burialRecords[0]) {
+        focusAdminRecord(burialRecords[0]);
+    }
 
     if (notificationButton) {
         notificationButton.addEventListener("click", () => {
