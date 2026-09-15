@@ -856,6 +856,8 @@ RESPONSIVE
 .modal-content{
     background:#fff;
     width:min(560px, 92vw);
+    max-height:calc(100vh - 32px);
+    overflow-y:auto;
     border-radius:16px;
     padding:24px;
     box-shadow:0 15px 40px rgba(0,0,0,.2);
@@ -879,6 +881,9 @@ RESPONSIVE
 .record-form{
     display:grid;
     gap:14px;
+    max-height:calc(100vh - 150px);
+    overflow-y:auto;
+    padding-right:8px;
 }
 
 .record-form label{
@@ -1159,6 +1164,61 @@ table{
 
 @media(max-width:576px){
 
+body.dashboard-body{
+    overflow-x:hidden;
+}
+
+.sidebar{
+    width:72px;
+    padding:18px 10px;
+}
+
+.sidebar-logo{
+    margin-bottom:28px;
+}
+
+.sidebar-logo i{
+    font-size:32px;
+}
+
+.sidebar ul li a{
+    display:flex;
+    justify-content:center;
+    padding:13px 8px;
+}
+
+.sidebar i{
+    width:auto;
+    font-size:18px;
+}
+
+.main-content{
+    margin-left:72px;
+    padding:18px 12px;
+}
+
+.topbar{
+    margin-bottom:24px;
+    gap:14px;
+}
+
+.topbar-right{
+    width:100%;
+    justify-content:space-between;
+}
+
+.admin-profile{
+    margin-left:auto;
+}
+
+.admin-profile div{
+    display:none;
+}
+
+.page-header{
+    margin-bottom:22px;
+}
+
 .page-header h1{
     font-size:24px;
 }
@@ -1170,6 +1230,40 @@ table{
 .admin-profile img{
     width:40px;
     height:40px;
+}
+
+.table-section,
+.search-card,
+.coordinate-card,
+.legend-card,
+.activity-card,
+.notification-card{
+    padding:18px;
+}
+
+.search-box{
+    width:100%;
+}
+
+.map-controls{
+    align-items:flex-start;
+    flex-direction:column;
+}
+
+.map-controls .add-btn{
+    width:100%;
+}
+
+.gis-details{
+    gap:14px;
+}
+
+.form-actions{
+    flex-direction:column;
+}
+
+.form-actions button{
+    width:100%;
 }
 
 }
