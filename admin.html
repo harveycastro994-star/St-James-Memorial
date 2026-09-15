@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Administrator Dashboard | St. James Memorial Park</title>
+
+<link rel="stylesheet" href="style.css">
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+</head>
+
+<body class="dashboard-body">
+
+<!-- ======================
+SIDEBAR
+====================== -->
+
+<aside class="sidebar">
+
+<div class="sidebar-logo">
+
+<i class="fa-solid fa-map-location-dot"></i>
+
+<h2>St. James</h2>
+
+<p>Memorial Park</p>
+
+</div>
+
+<ul>
+
+<li class="active">
+
+<a href="#">
+
+<i class="fa-solid fa-house"></i>
+
+Dashboard
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#gis-section" id="sidebarMapLink">
+
+<i class="fa-solid fa-map"></i>
+
+Interactive GIS Map
+
+</a>
+
+</li>
+
+<li>
+
+<a href="burialrecords.html">
+
+<i class="fa-solid fa-table-list"></i>
+
+Burial Records
+
+</a>
+
+</li>
+
+<li>
+
+<a href="usercreation.html">
+
+<i class="fa-solid fa-user-plus"></i>
+
+User
+
+</a>
+
+</li>
+
+<li>
+
+<a href="reservationsadmin.html">
+
+<i class="fa-solid fa-bookmark"></i>
+
+Reservations
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#">
+
+<i class="fa-solid fa-chart-column"></i>
+
+Reports
+
+</a>
+
+</li>
+
+<li>
+
+<a href="index.html">
+
+<i class="fa-solid fa-right-from-bracket"></i>
+
+Logout
+
+</a>
+
+</li>
+
+</ul>
+
+</aside>
+
+<!-- ======================
+MAIN CONTENT
+====================== -->
+
+<div class="main-content">
+
+<!-- NAVBAR -->
+
+<header class="topbar">
+
+<div class="search-box">
+
+<i class="fa-solid fa-magnifying-glass"></i>
+
+<input
+id="adminSearchInput"
+type="text"
+placeholder="Search deceased, block or plot...">
+
+</div>
+
+<div class="topbar-right">
+
+<button id="notificationButton" type="button" aria-label="View recent burial activity">
+
+<i class="fa-solid fa-bell"></i>
+<span id="notificationBadge" class="notification-badge" aria-live="polite"></span>
+
+</button>
+
+<div class="admin-profile">
+
+<img src="images/profile.png">
+
+<div>
+
+<h4>Administrator</h4>
+
+<span>Online</span>
+
+</div>
+
+</div>
+
+</div>
+
+</header>
+
+<!-- PAGE TITLE -->
+
+<section class="page-header">
+
+<h1>
+
+Dashboard
+
+</h1>
+
+<p>
+
+Welcome back!
+
+Here's an overview of St. James Memorial Park.
+
+</p>
+
+</section>
+
+<!-- STATISTICS -->
+
+<section class="cards">
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="statsTotalBurials">0</h2>
+
+<p>Total Burials</p>
+
+</div>
+
+<i class="fa-solid fa-cross"></i>
+
+</div>
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="statsOccupiedPlots">0</h2>
+
+<p>Occupied Plots</p>
+
+</div>
+
+<i class="fa-solid fa-location-dot"></i>
+
+</div>
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="statsAvailablePlots">0</h2>
+
+<p>Available Plots</p>
+
+</div>
+
+<i class="fa-solid fa-square"></i>
+
+</div>
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="statsReservedPlots">0</h2>
+
+<p>Reserved Plots</p>
+
+</div>
+
+<i class="fa-solid fa-bookmark"></i>
+
+</div>
+
+<div class="stat-card">
+
+<div>
+
+<h2>12</h2>
+
+<p>Cemetery Blocks</p>
+
+</div>
+
+<i class="fa-solid fa-border-all"></i>
+
+</div>
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="statsRegisteredVisitors">0</h2>
+
+<p>Registered Visitors</p>
+
+</div>
+
+<i class="fa-solid fa-users"></i>
+
+</div>
+
+</section>
+
+<!-- GIS SECTION -->
+
+<section class="gis-section" id="gis-section">
+
+<div class="section-title">
+
+<h2>
+
+Interactive GIS Map
+
+</h2>
+
+</div>
+
+<div class="map-placeholder">
+
+<div id="adminMap" aria-label="Administrator cemetery map"></div>
+
+</div>
+
+</section>
+
+<!-- ======================
+GIS DETAILS
+====================== -->
+
+<section class="gis-details">
+
+    <div class="coordinate-card">
+
+        <h3>
+            <i class="fa-solid fa-location-crosshairs"></i>
+            Current Map Coordinates
+        </h3>
+
+        <p><strong>Latitude:</strong> <span id="adminLatitude">14.954621</span></p>
+        <p><strong>Longitude:</strong> <span id="adminLongitude">120.896542</span></p>
+
+        <button type="button" class="add-btn" id="useCurrentLocationBtn">
+            <i class="fa-solid fa-location-crosshairs"></i>
+            Use My GPS Location
+        </button>
+        <p id="gpsAccuracy" aria-live="polite"></p>
+
+        <span>
+            Coordinates automatically update as the administrator navigates the GIS map.
+        </span>
+
+    </div>
+
+    <div class="legend-card">
+
+        <h3>
+            <i class="fa-solid fa-map"></i>
+            Map Legend
+        </h3>
+
+        <ul>
+
+            <li>
+                <span class="legend available"></span>
+                Available Plot
+            </li>
+
+            <li>
+                <span class="legend occupied"></span>
+                Occupied Plot
+            </li>
+
+            <li>
+                <span class="legend reserved"></span>
+                Reserved Plot
+            </li>
+
+            <li>
+                <span class="legend pathway"></span>
+                Pathway
+            </li>
+
+        </ul>
+
+    </div>
+
+</section>
+
+<!-- ======================
+RECENT ACTIVITY
+====================== -->
+
+<section class="activity-section">
+
+<div class="activity-card">
+
+<h2>
+
+Recent Burial Activity
+
+</h2>
+
+<div id="recentBurialActivityList"></div>
+
+</div>
+
+</section>
+
+
+
+<!-- ======================
+FOOTER
+====================== -->
+
+<footer class="footer">
+
+<p>
+
+© 2026 St. James Memorial Park
+
+|
+
+GIS-Based Burial Site Mapping and Record Management System
+
+</p>
+
+</footer>
+
+</div>
+
+<div id="addRecordModal" class="modal hidden">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="recordModalTitle">Add Burial Record</h3>
+            <button class="modal-close" id="closeAddRecordModal" type="button">×</button>
+        </div>
+        <form id="addBurialRecordForm" class="record-form">
+            <input type="hidden" id="recordId" value="">
+            <label>
+                Deceased Name
+                <input type="text" id="recordName">
+            </label>
+            <label>
+                Block
+                <input type="text" id="recordBlock" required>
+            </label>
+            <label>
+                Plot
+                <input type="text" id="recordPlot" required>
+            </label>
+            <label>
+                Date of Burial
+                <input type="date" id="recordDate" required>
+            </label>
+            <label>
+                Status
+                <select id="recordStatus">
+                    <option value="Occupied">Occupied</option>
+                    <option value="Reserved">Reserved</option>
+                    <option value="Available">Available</option>
+                </select>
+            </label>
+            <label>
+                Grave Condition
+                <select id="recordCleanliness">
+                    <option value="Clean">Clean</option>
+                    <option value="Dirty">Dirty</option>
+                </select>
+            </label>
+            <label>
+                Latitude
+                <input type="number" step="any" id="recordLatitude" value="14.954621">
+            </label>
+            <label>
+                Longitude
+                <input type="number" step="any" id="recordLongitude" value="120.896542">
+            </label>
+            <div class="form-actions">
+                <button type="submit" class="add-btn" id="saveRecordBtn">Save Record</button>
+                <button type="button" class="secondary-btn" id="cancelAddRecordBtn">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="script.js"></script>
+<script>
+    const USER_STORAGE_KEY = "stjamesUserAccounts";
+
+    function updateRegisteredVisitorsCount() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(USER_STORAGE_KEY) || "null");
+            const users = Array.isArray(saved)
+                ? saved
+                : [
+                    { id: 1, name: "Administrator", username: "admin", password: "admin123", role: "admin" },
+                    { id: 2, name: "Visitor", username: "visitor", password: "visitor123", role: "visitor" }
+                ];
+            const visitorCount = users.filter((user) => user.role === "visitor").length;
+            const statsElement = document.getElementById("statsRegisteredVisitors");
+            if (statsElement) {
+                statsElement.textContent = visitorCount;
+            }
+        } catch (error) {
+            console.warn("Unable to update registered visitors count:", error);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", updateRegisteredVisitorsCount);
+</script>
+
+</body>
+
+</html>
