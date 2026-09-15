@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Account Creation | St. James Memorial Park</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body class="dashboard-body">
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <i class="fa-solid fa-map-location-dot"></i>
+            <h2>St. James</h2>
+            <p>Memorial Park</p>
+        </div>
+        <ul>
+            <li>
+                <a href="admin.html">
+                    <i class="fa-solid fa-house"></i>
+                    Dashboard
+                </a>
+            </li>
+            <li>
+                <a href="admin.html#gis-section">
+                    <i class="fa-solid fa-map"></i>
+                    Interactive GIS Map
+                </a>
+            </li>
+            <li>
+                <a href="burialrecords.html">
+                    <i class="fa-solid fa-table-list"></i>
+                    Burial Records
+                </a>
+            </li>
+            <li>
+                <a href="#">
+                    <i class="fa-solid fa-border-all"></i>
+                    Cemetery Blocks
+                </a>
+            </li>
+            <li class="active">
+                <a href="usercreation.html">
+                    <i class="fa-solid fa-user-plus"></i>
+                    User
+                </a>
+            </li>
+            <li>
+                <a href="#">
+                    <i class="fa-solid fa-chart-column"></i>
+                    Reports
+                </a>
+            </li>
+            <li>
+                <a href="index.html">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                    Logout
+                </a>
+            </li>
+        </ul>
+    </aside>
+
+    <div class="main-content">
+        <header class="topbar">
+            <div class="search-box">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" placeholder="Search users...">
+            </div>
+            <div class="topbar-right">
+                <button>
+                    <i class="fa-solid fa-bell"></i>
+                </button>
+                <div class="admin-profile">
+                    <img src="images/profile.png" alt="Admin profile">
+                    <div>
+                        <h4>Administrator</h4>
+                        <span>Online</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <section class="page-header">
+            <h1>User Account Creation</h1>
+            <p>Create and manage accounts for administrators and visitors.</p>
+        </section>
+
+        <section class="table-section">
+            <div class="table-header">
+                <h2>Create New Account</h2>
+            </div>
+            <form id="accountForm" class="record-form">
+                <label>
+                    Full Name
+                    <input type="text" id="fullName" placeholder="Enter full name" required>
+                </label>
+                <label>
+                    Username
+                    <input type="text" id="username" placeholder="Enter username" required>
+                </label>
+                <label>
+                    Password
+                    <input type="password" id="password" placeholder="Enter password" required>
+                </label>
+                <label>
+                    Account Role
+                    <select id="role" required>
+                        <option value="">Select role</option>
+                        <option value="admin">Administrator</option>
+                        <option value="visitor">Visitor</option>
+                    </select>
+                </label>
+                <label id="graveSelectionWrapper" style="display:none;">
+                    Select Grave
+                    <select id="graveSelection"></select>
+                </label>
+                <div class="form-actions">
+                    <button type="submit" class="add-btn">Create Account</button>
+                    <button type="reset" class="secondary-btn">Clear</button>
+                </div>
+                <p id="formMessage" class="form-message"></p>
+            </form>
+        </section>
+
+        <section class="table-section" style="margin-top:24px;">
+            <div class="table-header">
+                <h2>Existing Accounts</h2>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="accountTableBody"></tbody>
+            </table>
+        </section>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const USER_STORAGE_KEY = "stjamesUserAccounts";
+        const supabaseUrl = "https://ouzfgihgrlssdsqupxit.supabase.co";
+        const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91emZnaWhncmxzc2RzcXVweGl0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4Mzc1NTAsImV4cCI6MjEwNDQxMzU1MH0.HSOvDFT_a6N7jk4e_-xlZkXqQfyCnIYyHGS2T07s1K0";
+        const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+        function getStoredUsers() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(USER_STORAGE_KEY) || "null");
+                if (Array.isArray(saved) && saved.length > 0) {
+                    return saved;
+                }
+            } catch (error) {
+                console.warn("Unable to read user accounts:", error);
+            }
+
+            return [
+                { id: 1, name: "Administrator", username: "admin", password: "admin123", role: "admin" },
+                { id: 2, name: "Visitor", username: "visitor", password: "visitor123", role: "visitor" }
+            ];
+        }
+
+        function saveStoredUsers(users) {
+            localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(users));
+        }
+
+        async function loadUsersFromSupabase() {
+            const { data, error } = await supabaseClient
+                .from("user_accounts")
+                .select("*")
+                .order("id");
+
+            if (error) {
+                console.warn("Unable to load user accounts from Supabase:", error.message);
+                return;
+            }
+
+            if (Array.isArray(data) && data.length > 0) {
+                saveStoredUsers(data);
+                renderAccounts();
+            }
+        }
+
+        async function saveUserToSupabase(account) {
+            const { error } = await supabaseClient
+                .from("user_accounts")
+                .upsert(account, { onConflict: "id" });
+
+            if (error) {
+                console.warn("Unable to save user account to Supabase:", error.message);
+                return false;
+            }
+
+            return true;
+        }
+
+        async function deleteUserFromSupabase(id) {
+            const { error } = await supabaseClient
+                .from("user_accounts")
+                .delete()
+                .eq("id", id);
+
+            if (error) {
+                console.warn("Unable to delete user account from Supabase:", error.message);
+            }
+        }
+
+        async function saveAssignmentNotificationToSupabase(notification) {
+            const { error } = await supabaseClient
+                .from("grave_condition_notifications")
+                .upsert({
+                    id: notification.id,
+                    name: notification.name,
+                    block: notification.block,
+                    plot: notification.plot,
+                    old_condition: notification.oldCondition,
+                    new_condition: notification.newCondition,
+                    created_at: new Date(notification.timestamp).toISOString()
+                }, { onConflict: "id" });
+
+            if (error) {
+                console.warn("Unable to save assignment notification to Supabase:", error.message);
+            }
+        }
+
+        function getBurialRecords() {
+            try {
+                const saved = JSON.parse(localStorage.getItem("stjames.db") || "null");
+                if (Array.isArray(saved) && saved.length > 0) {
+                    return saved;
+                }
+            } catch (error) {
+                console.warn("Unable to read burial records:", error);
+            }
+
+            return [
+                { id: "001", name: "Clance Yhvan Cruz", block: "Block A", plot: "A-024", date: "January 15, 2025", status: "Occupied", cleanliness: "Clean", lat: 14.5995, lng: 120.9842 },
+                { id: "002", name: "Maria Elena Santos", block: "Block C", plot: "C-015", date: "February 3, 2025", status: "Occupied", cleanliness: "Dirty", lat: 14.6004, lng: 120.9831 },
+                { id: "003", name: "Juan Dela Cruz", block: "Block D", plot: "D-010", date: "March 12, 2025", status: "Reserved", cleanliness: "Clean", lat: 14.5988, lng: 120.9853 },
+                { id: "004", name: "Rosa B. Fernandez", block: "Block B", plot: "B-007", date: "April 18, 2025", status: "Available", cleanliness: "Dirty", lat: 14.6011, lng: 120.9860 },
+                { id: "005", name: "Emilio R. Torres", block: "Block E", plot: "E-021", date: "May 5, 2025", status: "Occupied", cleanliness: "Clean", lat: 14.5979, lng: 120.9838 }
+            ];
+        }
+
+        function saveBurialRecords(records) {
+            localStorage.setItem("stjames.db", JSON.stringify(records));
+        }
+
+        function populateGraveSelection() {
+            const graveSelect = document.getElementById("graveSelection");
+            const wrapper = document.getElementById("graveSelectionWrapper");
+            const role = document.getElementById("role").value;
+
+            if (!graveSelect || !wrapper) {
+                return;
+            }
+
+            if (role !== "visitor") {
+                wrapper.style.display = "none";
+                graveSelect.innerHTML = "";
+                return;
+            }
+
+            const records = getBurialRecords();
+            const allGraves = records.map((record) => ({
+                value: `${record.block}|${record.plot}|${record.id}`,
+                label: `${record.block} - Plot ${record.plot} (${record.status})`
+            }));
+
+            graveSelect.innerHTML = "";
+
+            const defaultOption = document.createElement("option");
+            defaultOption.value = "";
+            defaultOption.textContent = "Select a grave";
+            graveSelect.appendChild(defaultOption);
+
+            allGraves.forEach((grave) => {
+                const option = document.createElement("option");
+                option.value = grave.value;
+                option.textContent = grave.label;
+                graveSelect.appendChild(option);
+            });
+
+            wrapper.style.display = "block";
+        }
+
+        async function assignVisitorGrave(fullName, selectedGraveValue) {
+            const records = getBurialRecords();
+            let selectedRecord = null;
+
+            if (selectedGraveValue) {
+                const [block, plot] = selectedGraveValue.split("|");
+                selectedRecord = records.find((record) => record.block === block && record.plot === plot);
+            }
+
+            if (!selectedRecord) {
+                selectedRecord = records.find((record) => record.status === "Available") || records[0];
+            }
+
+            if (!selectedRecord) {
+                return null;
+            }
+
+            const oldStatus = selectedRecord.status;
+            selectedRecord.name = fullName;
+            selectedRecord.status = "Reserved";
+            selectedRecord.date = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+            saveBurialRecords(records);
+
+            const notifications = JSON.parse(localStorage.getItem("graveConditionNotifications") || "[]");
+            const notification = {
+                id: `grave-${Date.now()}`,
+                name: fullName,
+                block: selectedRecord.block,
+                plot: selectedRecord.plot,
+                oldCondition: oldStatus,
+                newCondition: "Assigned",
+                timestamp: Date.now()
+            };
+            notifications.unshift(notification);
+            localStorage.setItem("graveConditionNotifications", JSON.stringify(notifications.slice(0, 5)));
+            await saveAssignmentNotificationToSupabase(notification);
+
+            return {
+                block: selectedRecord.block,
+                plot: selectedRecord.plot
+            };
+        }
+
+        function renderAccounts() {
+            const accounts = getStoredUsers();
+            const body = document.getElementById("accountTableBody");
+            body.innerHTML = "";
+
+            if (!accounts.length) {
+                body.innerHTML = '<tr><td colspan="4" class="empty-state">No accounts created yet.</td></tr>';
+                return;
+            }
+
+            accounts.forEach((account) => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${account.name}</td>
+                    <td>${account.username}</td>
+                    <td>${account.role === "admin" ? "Administrator" : "Visitor"}</td>
+                    <td>
+                        <button type="button" class="table-action-btn delete-btn" onclick="deleteAccount(${account.id})">Delete</button>
+                    </td>
+                `;
+                body.appendChild(row);
+            });
+        }
+
+        async function deleteAccount(id) {
+            const updatedAccounts = getStoredUsers().filter((account) => account.id !== id);
+            saveStoredUsers(updatedAccounts);
+            await deleteUserFromSupabase(id);
+            renderAccounts();
+            const message = document.getElementById("formMessage");
+            message.textContent = "Account deleted.";
+            message.className = "form-message success";
+        }
+
+        document.getElementById("accountForm").addEventListener("submit", async function (event) {
+            event.preventDefault();
+
+            const fullName = document.getElementById("fullName").value.trim();
+            const username = document.getElementById("username").value.trim();
+            const password = document.getElementById("password").value;
+            const role = document.getElementById("role").value;
+            const message = document.getElementById("formMessage");
+
+            if (!fullName || !username || !password || !role) {
+                message.textContent = "Please complete all fields.";
+                message.className = "form-message error";
+                return;
+            }
+
+            const accounts = getStoredUsers();
+            const usernameExists = accounts.some((account) => account.username.toLowerCase() === username.toLowerCase());
+
+            if (usernameExists) {
+                message.textContent = "That username already exists.";
+                message.className = "form-message error";
+                return;
+            }
+
+            if (role === "visitor") {
+                const selectedGraveValue = document.getElementById("graveSelection").value;
+                if (!selectedGraveValue) {
+                    message.textContent = "Please select an available grave for the visitor.";
+                    message.className = "form-message error";
+                    return;
+                }
+
+                const assignedGrave = await assignVisitorGrave(fullName, selectedGraveValue);
+                if (!assignedGrave) {
+                    message.textContent = "No available grave is currently available.";
+                    message.className = "form-message error";
+                    return;
+                }
+
+                accounts.push({
+                    id: Date.now(),
+                    name: fullName,
+                    username,
+                    password,
+                    role,
+                    grave: assignedGrave
+                });
+
+                const newAccount = accounts[accounts.length - 1];
+                saveStoredUsers(accounts);
+                const savedToSupabase = await saveUserToSupabase(newAccount);
+                renderAccounts();
+                this.reset();
+                document.getElementById("graveSelectionWrapper").style.display = "none";
+                message.textContent = savedToSupabase
+                    ? `Account created successfully. Grave assigned: ${assignedGrave.block} ${assignedGrave.plot}`
+                    : "Account saved locally, but not to Supabase. Check the browser console.";
+                message.className = "form-message success";
+                return;
+            }
+
+            accounts.push({
+                id: Date.now(),
+                name: fullName,
+                username,
+                password,
+                role
+            });
+
+            const newAccount = accounts[accounts.length - 1];
+            saveStoredUsers(accounts);
+            const savedToSupabase = await saveUserToSupabase(newAccount);
+            renderAccounts();
+            this.reset();
+            message.textContent = savedToSupabase
+                ? "Account created successfully."
+                : "Account saved locally, but not to Supabase. Check the browser console.";
+            message.className = savedToSupabase ? "form-message success" : "form-message error";
+        });
+
+        document.getElementById("role").addEventListener("change", populateGraveSelection);
+
+        renderAccounts();
+        populateGraveSelection();
+        loadUsersFromSupabase();
+    </script>
+</body>
+</html>

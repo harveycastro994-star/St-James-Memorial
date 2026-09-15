@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Reservations Management | St. James Memorial Park</title>
+
+<link rel="stylesheet" href="style.css">
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+</head>
+
+<body class="dashboard-body">
+
+<!-- ======================
+SIDEBAR
+====================== -->
+
+<aside class="sidebar">
+
+<div class="sidebar-logo">
+
+<i class="fa-solid fa-map-location-dot"></i>
+
+<h2>St. James</h2>
+
+<p>Memorial Park</p>
+
+</div>
+
+<ul>
+
+<li>
+
+<a href="admin.html">
+
+<i class="fa-solid fa-house"></i>
+
+Dashboard
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#gis-section" id="sidebarMapLink">
+
+<i class="fa-solid fa-map"></i>
+
+Interactive GIS Map
+
+</a>
+
+</li>
+
+<li>
+
+<a href="burialrecords.html">
+
+<i class="fa-solid fa-table-list"></i>
+
+Burial Records
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#">
+
+<i class="fa-solid fa-border-all"></i>
+
+Cemetery Blocks
+
+</a>
+
+</li>
+
+<li>
+
+<a href="usercreation.html">
+
+<i class="fa-solid fa-user-plus"></i>
+
+User
+
+</a>
+
+</li>
+
+<li class="active">
+
+<a href="reservationsadmin.html">
+
+<i class="fa-solid fa-bookmark"></i>
+
+Reservations
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#">
+
+<i class="fa-solid fa-chart-column"></i>
+
+Reports
+
+</a>
+
+</li>
+
+<li>
+
+<a href="index.html">
+
+<i class="fa-solid fa-right-from-bracket"></i>
+
+Logout
+
+</a>
+
+</li>
+
+</ul>
+
+</aside>
+
+<!-- ======================
+MAIN CONTENT
+====================== -->
+
+<div class="main-content" id="reservationsAdminPage">
+
+<header class="topbar">
+
+<div class="search-box">
+
+<i class="fa-solid fa-magnifying-glass"></i>
+
+<input id="reservationAdminSearchInput" type="text" placeholder="Search by name, block or plot...">
+
+</div>
+
+<div class="topbar-right">
+
+<button>
+
+<i class="fa-solid fa-bell"></i>
+
+</button>
+
+<div class="admin-profile">
+
+<img src="images/profile.png">
+
+<div>
+
+<h4>Administrator</h4>
+
+<span>Online</span>
+
+</div>
+
+</div>
+
+</div>
+
+</header>
+
+<section class="page-header">
+
+<h1>
+
+Reservations Management
+
+</h1>
+
+<p>
+
+Review, approve, or release plot reservations from the system.
+
+</p>
+
+</section>
+
+<section class="cards" style="grid-template-columns: repeat(3, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px;">
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="adminReservedCount">0</h2>
+
+<p>Reserved Plots</p>
+
+</div>
+
+<i class="fa-solid fa-bookmark"></i>
+
+</div>
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="adminAvailableCount">0</h2>
+
+<p>Available Plots</p>
+
+</div>
+
+<i class="fa-solid fa-square"></i>
+
+</div>
+
+<div class="stat-card">
+
+<div>
+
+<h2 id="adminOccupiedCount">0</h2>
+
+<p>Occupied Plots</p>
+
+</div>
+
+<i class="fa-solid fa-cross"></i>
+
+</div>
+
+</section>
+
+<section class="table-section">
+
+<div class="table-header">
+
+<h2>
+
+Active Reservations
+
+</h2>
+
+</div>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>ID</th>
+
+<th>Deceased</th>
+
+<th>Block</th>
+
+<th>Plot</th>
+
+<th>Status</th>
+
+<th>Action</th>
+
+</tr>
+
+</thead>
+
+<tbody id="reservationsAdminTableBody"></tbody>
+
+</table>
+
+</section>
+
+<section class="activity-section">
+
+<div class="activity-card">
+
+<h2>
+
+Reservation Notes
+
+</h2>
+
+<p>
+
+Use the actions to keep reservation statuses up to date. Available plots can be reserved and reserved plots can be released.
+
+</p>
+
+</div>
+
+</section>
+
+<footer class="footer">
+
+<p>
+
+© 2026 St. James Memorial Park
+
+|
+
+GIS-Based Burial Site Mapping and Record Management System
+
+</p>
+
+</footer>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="script.js"></script>
+
+</body>
+
+</html>

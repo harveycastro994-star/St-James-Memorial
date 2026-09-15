@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Visitor Dashboard | St. James Memorial Park</title>
+
+<link rel="stylesheet" href="style.css">
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+</head>
+
+<body class="dashboard-body">
+
+<!-- =========================
+SIDEBAR
+========================= -->
+
+<aside class="sidebar">
+
+<div class="sidebar-logo">
+
+<i class="fa-solid fa-map-location-dot"></i>
+
+<h2>St. James</h2>
+
+<p>Memorial Park</p>
+
+</div>
+
+<ul>
+
+<li class="active">
+
+<a href="#">
+
+<i class="fa-solid fa-house"></i>
+
+Home
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#">
+
+<i class="fa-solid fa-magnifying-glass-location"></i>
+
+Find Burial Site
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#">
+
+<i class="fa-solid fa-map"></i>
+
+Interactive GIS Map
+
+</a>
+
+</li>
+
+<li>
+
+<a href="reservationuser.html">
+
+<i class="fa-solid fa-bookmark"></i>
+
+Reservations
+
+</a>
+
+</li>
+
+<li>
+
+<a href="#">
+
+<i class="fa-solid fa-circle-info"></i>
+
+About
+
+</a>
+
+</li>
+
+<li>
+
+<a href="index.html">
+
+<i class="fa-solid fa-right-from-bracket"></i>
+
+Logout
+
+</a>
+
+</li>
+
+</ul>
+
+</aside>
+
+<!-- =========================
+MAIN CONTENT
+========================= -->
+
+<div class="main-content">
+
+<header class="topbar">
+
+<div class="search-box">
+
+<i class="fa-solid fa-magnifying-glass"></i>
+
+<input
+type="text"
+placeholder="Search deceased name...">
+
+</div>
+
+<div class="topbar-right">
+
+<button class="notification-btn" id="notificationButton" type="button">
+    <i class="fa-solid fa-bell"></i>
+    Notifications
+    <span id="notificationBadge" class="notification-badge"></span>
+</button>
+
+<div class="admin-profile">
+
+<img src="images/profile.png">
+
+<div>
+
+<h4>Visitor</h4>
+
+<span>Guest Access</span>
+
+</div>
+
+</div>
+
+</div>
+
+</header>
+
+<section class="page-header">
+
+<h1>
+
+Find Your Loved One
+
+</h1>
+
+<p>
+
+Search burial information and locate graves using the interactive GIS map.
+
+</p>
+
+</section>
+
+<!-- SEARCH CARD -->
+
+<section class="table-section">
+
+<h2>
+
+Search Burial Record
+
+</h2>
+
+<br>
+
+<div class="search-box">
+
+<i class="fa-solid fa-user"></i>
+
+<input
+id="burialSearchInput"
+type="text"
+placeholder="Enter the deceased person's full name">
+
+</div>
+
+<br>
+
+<button class="add-btn" id="searchBurialBtn" type="button">
+
+<i class="fa-solid fa-magnifying-glass"></i>
+
+Search
+
+</button>
+
+</section>
+
+<!-- GIS MAP -->
+
+<section class="gis-section">
+
+<div class="section-title">
+
+<h2>
+
+Interactive Cemetery Map
+
+</h2>
+
+</div>
+
+<div class="map-placeholder">
+
+<div id="map" aria-label="Interactive cemetery map"></div>
+
+</div>
+
+<div class="map-controls">
+    <button type="button" class="add-btn" id="useUserCurrentLocationBtn">
+        <i class="fa-solid fa-location-crosshairs"></i>
+        Use My GPS Location
+    </button>
+    <span id="userGpsAccuracy" aria-live="polite"></span>
+</div>
+
+</section>
+
+<!-- =========================
+BURIAL INFORMATION
+========================= -->
+
+<section class="gis-details">
+
+    <div class="coordinate-card">
+
+        <h3>
+            <i class="fa-solid fa-id-card"></i>
+            Burial Information
+        </h3>
+
+        <p><strong>Deceased Name:</strong> <span id="burialName">Clance Yhvan Cruz</span></p>
+        <p><strong>Block:</strong> <span id="burialBlock">Block A</span></p>
+        <p><strong>Plot Number:</strong> <span id="burialPlot">A-024</span></p>
+        <p><strong>Date of Burial:</strong> <span id="burialDate">January 15, 2025</span></p>
+        <p><strong>Status:</strong> <span id="burialStatus">Occupied</span></p>
+        <p><strong>Current GPS Latitude:</strong> <span id="userLatitude">--</span></p>
+        <p><strong>Current GPS Longitude:</strong> <span id="userLongitude">--</span></p>
+
+        <button class="add-btn" id="navigateToGraveBtn" type="button">
+
+            <i class="fa-solid fa-route"></i>
+
+            Navigate to Grave
+
+        </button>
+        <p id="navigationStatus" aria-live="polite"></p>
+
+    </div>
+
+    <div class="legend-card">
+
+        <h3>
+
+            <i class="fa-solid fa-map"></i>
+
+            Cemetery Map Legend
+
+        </h3>
+
+        <ul>
+
+            <li>
+
+                <span class="legend available"></span>
+
+                Available Plot
+
+            </li>
+
+            <li>
+
+                <span class="legend occupied"></span>
+
+                Occupied Plot
+
+            </li>
+
+            <li>
+
+                <span class="legend reserved"></span>
+
+                Reserved Plot
+
+            </li>
+
+            <li>
+
+                <span class="legend pathway"></span>
+
+                Walkway / Road
+
+            </li>
+
+        </ul>
+
+    </div>
+
+</section>
+
+<!-- =========================
+RECENT SEARCHES
+========================= -->
+
+<section class="activity-section">
+
+<div class="activity-card">
+
+<h2>
+
+Recent Searches
+
+</h2>
+
+<div id="recentSearchesList"></div>
+
+</div>
+
+</section>
+
+<!-- =========================
+GRAVE CONDITION UPDATES
+========================= -->
+
+<section class="notification-section" id="conditionNotificationSection">
+
+<div class="notification-card">
+
+<h2>
+
+Condition Updates
+
+</h2>
+
+<div id="conditionNotificationList"></div>
+
+</div>
+
+</section>
+
+<!-- =========================
+QUICK INFORMATION
+========================= -->
+
+<section class="table-section">
+
+<div class="table-header">
+
+<h2>
+
+Visitor Guidelines
+
+</h2>
+
+</div>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>Service</th>
+
+<th>Description</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<tr>
+
+<td>Search Burial</td>
+
+<td>Locate a loved one's burial site using their name.</td>
+
+</tr>
+
+<tr>
+
+<td>Interactive GIS Map</td>
+
+<td>View the exact burial location through the digital cemetery map.</td>
+
+</tr>
+
+<tr>
+
+<td>Navigation</td>
+
+<td>Receive directions from the cemetery entrance to the selected grave.</td>
+
+</tr>
+
+<tr>
+
+<td>Burial Information</td>
+
+<td>View block number, plot number, and burial details.</td>
+
+</tr>
+
+</tbody>
+
+</table>
+
+</section>
+
+<!-- =========================
+FOOTER
+========================= -->
+
+<footer class="footer">
+
+<p>
+
+© 2026 St. James Memorial Park
+
+|
+
+GIS-Based Burial Site Mapping and Record Management System
+
+</p>
+
+</footer>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="script.js"></script>
+
+</body>
+
+</html>

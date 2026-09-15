@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>St. James Memorial Park</title>
+
+    <link rel="stylesheet" href="style.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+
+<body>
+
+<div class="overlay"></div>
+
+<div class="container">
+
+    <!-- LEFT PANEL -->
+
+    <div class="left-panel">
+
+        <div class="logo">
+            <i class="fa-solid fa-map-location-dot"></i>
+            <h1>St. James Memorial Park</h1>
+
+            <p>
+                GIS-Based Burial Site Mapping
+                <br>
+                and Record Management System
+            </p>
+        </div>
+
+        <div class="description">
+
+            <h2>Welcome</h2>
+
+            <p>
+
+                This system enables administrators to manage cemetery
+                records, burial information, cemetery blocks and GIS maps.
+
+                Visitors can quickly locate loved ones using the interactive
+                cemetery map.
+
+            </p>
+
+        </div>
+
+    </div>
+
+    <!-- RIGHT PANEL -->
+
+    <div class="right-panel">
+
+        <!-- ROLE SELECTION -->
+
+        <div class="card" id="rolePage">
+
+            <h2>Select Access</h2>
+
+            <p>
+                Please choose your account type.
+            </p>
+
+            <div class="role admin" onclick="showAdmin()">
+
+                <i class="fa-solid fa-user-shield"></i>
+
+                <h3>Administrator</h3>
+
+                <span>
+                    Manage cemetery records,
+                    GIS map,
+                    reports and users.
+                </span>
+
+            </div>
+
+            <div class="role visitor" onclick="showVisitor()">
+
+                <i class="fa-solid fa-users"></i>
+
+                <h3>Visitor</h3>
+
+                <span>
+                    Locate burial sites
+                    and view burial information.
+                </span>
+
+            </div>
+
+        </div>
+
+        <!-- LOGIN -->
+
+        <div class="card login-card" id="loginPage">
+
+            <button class="backBtn" onclick="goBack()">
+
+                <i class="fa-solid fa-arrow-left"></i>
+
+                Back
+
+            </button>
+
+            <h2 id="loginTitle"></h2>
+
+            <p id="loginDescription"></p>
+
+            <form>
+
+                <div class="inputBox">
+
+                    <i class="fa-solid fa-user"></i>
+
+                    <input
+                    type="text"
+                    id="username"
+                    placeholder="Username">
+
+                </div>
+
+                <div class="inputBox">
+
+                    <i class="fa-solid fa-lock"></i>
+
+                    <input
+                    type="password"
+                    id="password"
+                    placeholder="Password">
+
+                </div>
+
+                <button type="button" class="loginButton" id="loginButton">
+                    LOGIN
+                </button>
+
+            </form>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+const rolePage=document.getElementById("rolePage");
+
+const loginPage=document.getElementById("loginPage");
+
+const loginTitle=document.getElementById("loginTitle");
+
+const loginDescription=document.getElementById("loginDescription");
+
+const loginButton=document.getElementById("loginButton");
+
+loginPage.style.display="none";
+
+const USER_STORAGE_KEY="stjamesUserAccounts";
+
+function getStoredUsers(){
+
+try{
+
+const saved=JSON.parse(localStorage.getItem(USER_STORAGE_KEY)||"null");
+
+if(Array.isArray(saved)&&saved.length>0){
+
+return saved;
+
+}
+
+}catch(error){
+
+console.warn("Unable to read user accounts:", error);
+
+}
+
+return[
+
+{id:1,name:"Administrator",username:"admin",password:"admin123",role:"admin"},
+
+{id:2,name:"Visitor",username:"visitor",password:"visitor123",role:"visitor"}
+
+];
+
+}
+
+function authenticateUser(username,password,role){
+
+const normalizedUsername=(username||"").trim().toLowerCase();
+
+return getStoredUsers().find((account)=>account.username.toLowerCase()===normalizedUsername && account.password===password && account.role===role);
+
+}
+
+function showAdmin(){
+
+rolePage.style.display="none";
+
+loginPage.style.display="block";
+
+loginTitle.innerHTML="Administrator Login";
+
+loginDescription.innerHTML="Authorized personnel only.";
+
+loginButton.onclick=function(e){
+
+e.preventDefault();
+
+const username=document.getElementById("username").value;
+const password=document.getElementById("password").value;
+
+if(authenticateUser(username,password,"admin")){
+
+sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({ username: username.trim().toLowerCase(), role: "admin" }));
+window.location.href="admin.html";
+
+}else{
+
+alert("Invalid Administrator Username or Password.");
+
+}
+
+}
+
+}
+
+function showVisitor(){
+
+rolePage.style.display="none";
+
+loginPage.style.display="block";
+
+loginTitle.innerHTML="Visitor Login";
+
+loginDescription.innerHTML="Locate and view burial information.";
+
+loginButton.onclick=function(e){
+
+e.preventDefault();
+
+const username=document.getElementById("username").value;
+const password=document.getElementById("password").value;
+
+if(authenticateUser(username,password,"visitor")){
+
+const account = authenticateUser(username, password, "visitor");
+sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({
+username: account.username,
+role: account.role,
+grave: account.grave || null
+}));
+window.location.href="user.html";
+
+}else{
+
+alert("Invalid Visitor Username or Password.");
+
+}
+
+}
+
+}
+
+function goBack(){
+
+loginPage.style.display="none";
+
+rolePage.style.display="block";
+
+}
+
+</script>
+
+</body>
+</html>
