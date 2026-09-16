@@ -783,7 +783,6 @@ function focusAdminRecord(record) {
         adminMarker.bindPopup(`<strong>${record.name}</strong><br>${record.block} • Plot ${record.plot}`);
     }
 
-    adminMap.setView([record.lat, record.lng], 16);
     adminMarker.openPopup();
 
     const latitudeElement = document.getElementById("adminLatitude");
@@ -848,7 +847,6 @@ function focusBurialOnMap(record) {
 
     currentMarker = L.marker([record.lat, record.lng]).addTo(cemeteryMap);
     currentMarker.bindPopup(`<strong>${record.name}</strong><br>${record.block} • Plot ${record.plot}`);
-    cemeteryMap.setView([record.lat, record.lng], 16);
 }
 
 function renderRecentSearches() {
