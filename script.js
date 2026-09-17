@@ -1294,7 +1294,9 @@ function renderUserReservations() {
         return;
     }
 
-    tableBody.innerHTML = burialRecords.map((record) => `
+    const availableRecords = burialRecords.filter((record) => record.status === "Available");
+
+    tableBody.innerHTML = availableRecords.map((record) => `
         <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}">
             <td>${record.id}</td>
             <td>${getDisplayName(record)}</td>
@@ -1302,8 +1304,8 @@ function renderUserReservations() {
             <td>${record.plot}</td>
             <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
             <td>
-                <button class="table-action-btn" data-action="reservation" data-record-id="${record.id}" ${record.status !== "Available" ? "disabled" : ""}>
-                    ${record.status === "Available" ? "Reserve" : "Unavailable"}
+                <button class="table-action-btn" data-action="reservation" data-reservation-status="available" data-record-id="${record.id}">
+                    Reserve
                 </button>
             </td>
         </tr>
@@ -1326,7 +1328,7 @@ function renderAdminReservations() {
             <td>${record.plot}</td>
             <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
             <td>
-                <button class="table-action-btn" data-action="toggle-reservation" data-record-id="${record.id}">
+                <button class="table-action-btn" data-action="toggle-reservation" data-reservation-status="${record.status.toLowerCase()}" data-record-id="${record.id}">
                     ${record.status === "Reserved" ? "Release" : record.status === "Available" ? "Reserve" : "Locked"}
                 </button>
             </td>

@@ -747,6 +747,35 @@ RESPONSIVE
     background:#d1fae5;
 }
 
+.table-action-btn[data-action="reservation"],
+.table-action-btn[data-action="toggle-reservation"]{
+    background:#15803D;
+    color:white;
+}
+
+.table-action-btn[data-action="reservation"]:hover,
+.table-action-btn[data-action="toggle-reservation"]:hover{
+    background:#166534;
+}
+
+.table-action-btn[data-reservation-status="available"]{
+    background:#15803D;
+    color:white;
+}
+
+.table-action-btn[data-reservation-status="available"]:hover{
+    background:#166534;
+}
+
+.table-action-btn[data-reservation-status="occupied"]{
+    background:#DC2626;
+    color:white;
+}
+
+.table-action-btn[data-reservation-status="occupied"]:hover{
+    background:#B91C1C;
+}
+
 .table-action-btn.delete-btn{
     background:#fee2e2;
     color:#b91c1c;
