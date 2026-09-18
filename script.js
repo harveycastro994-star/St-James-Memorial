@@ -1767,7 +1767,12 @@ function initializeBurialSearch() {
 
     if (notificationButton) {
         notificationButton.addEventListener("click", () => {
+            const notificationBadge = document.getElementById("notificationBadge");
             const section = document.getElementById("conditionNotificationSection");
+            if (notificationBadge) {
+                notificationBadge.textContent = "";
+                notificationBadge.style.display = "none";
+            }
             if (section) {
                 section.scrollIntoView({ behavior: "smooth", block: "start" });
             }
@@ -1805,7 +1810,12 @@ function initializeAdminDashboard() {
 
     if (notificationButton) {
         notificationButton.addEventListener("click", () => {
+            const notificationBadge = document.getElementById("notificationBadge");
             const activitySection = document.querySelector(".activity-section");
+            if (notificationBadge) {
+                notificationBadge.textContent = "";
+                notificationBadge.style.display = "none";
+            }
             if (activitySection) {
                 activitySection.scrollIntoView({ behavior: "smooth", block: "start" });
             }
