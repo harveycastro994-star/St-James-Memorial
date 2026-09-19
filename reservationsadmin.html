@@ -322,6 +322,31 @@ GIS-Based Burial Site Mapping and Record Management System
 
 </div>
 
+<div id="reviewApplicationModal" class="modal hidden">
+<div class="modal-content">
+<div class="modal-header">
+<h3>Reservation Application</h3>
+<button class="modal-close" id="closeReviewApplicationModal" type="button" aria-label="Close application">×</button>
+</div>
+<div class="application-review">
+<h4>Applicant Information</h4>
+<p>Full Name: <strong id="reviewApplicantFullName"></strong></p>
+<p>Email: <strong id="reviewApplicantEmail"></strong></p>
+<p>Contact Number: <strong id="reviewApplicantContactNumber"></strong></p>
+<h4>Deceased Information</h4>
+<p>Full Name: <strong id="reviewDeceasedFullName"></strong></p>
+<p>Date of Birth: <strong id="reviewDeceasedDateOfBirth"></strong></p>
+<p>Date of Death: <strong id="reviewDeceasedDateOfDeath"></strong></p>
+<p>Preferred Burial Date: <strong id="reviewPreferredBurialDate"></strong></p>
+<p>Application Status: <strong id="reviewApplicationStatus"></strong></p>
+<div class="form-actions">
+<button type="button" class="add-btn" id="acceptReservationApplicationBtn">Accept</button>
+<button type="button" class="danger-btn" id="rejectReservationApplicationBtn">Reject</button>
+</div>
+</div>
+</div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="script.js"></script>
 

@@ -275,6 +275,8 @@ const RECENT_SEARCHES_KEY = "recentBurialSearches";
 const GRAVE_CONDITION_NOTIFICATIONS_KEY = "graveConditionNotifications";
 const CURRENT_USER_KEY = "stjamesCurrentUser";
 const RECENT_BURIAL_ACTIVITY_KEY = "recentBurialActivityLog";
+const RESERVATION_APPLICATIONS_KEY = "stjamesReservationApplications";
+let reservationApplications = [];
 let cemeteryMap = null;
 let currentMarker = null;
 let userGpsMarker = null;
@@ -290,6 +292,105 @@ let adminMarkersLayer = null;
 let cemeteryLocationMarker = null;
 let activeRecordMode = "add";
 const PLARIDEL_CEMETERY_COORDINATES = [14.8830, 120.8614];
+
+function getReservationApplications() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(RESERVATION_APPLICATIONS_KEY) || "[]");
+        return Array.isArray(saved) ? saved : [];
+    } catch (error) {
+        console.warn("Unable to load reservation applications:", error);
+        return [];
+    }
+}
+
+function saveReservationApplicationsToStorage() {
+    localStorage.setItem(RESERVATION_APPLICATIONS_KEY, JSON.stringify(reservationApplications));
+}
+
+async function loadReservationApplications() {
+    if (supabaseClient) {
+        const { data, error } = await supabaseClient
+            .from("reservation_applications")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+        if (!error && Array.isArray(data)) {
+            reservationApplications = data.map((application) => ({
+                id: application.id,
+                recordId: application.record_id,
+                applicantFullName: application.applicant_full_name,
+                applicantEmail: application.applicant_email,
+                applicantContactNumber: application.applicant_contact_number,
+                deceasedFullName: application.deceased_full_name,
+                deceasedDateOfBirth: application.deceased_date_of_birth,
+                deceasedDateOfDeath: application.deceased_date_of_death,
+                preferredBurialDate: application.preferred_burial_date,
+                status: application.status,
+                createdAt: application.created_at
+            }));
+            saveReservationApplicationsToStorage();
+            return;
+        }
+
+        if (error) {
+            console.warn("Unable to load reservation applications from Supabase:", error.message);
+        }
+    }
+
+    reservationApplications = getReservationApplications();
+}
+
+async function saveReservationApplication(application) {
+    reservationApplications = [application, ...reservationApplications.filter((item) => item.recordId !== application.recordId)];
+    saveReservationApplicationsToStorage();
+
+    if (!supabaseClient) {
+        return true;
+    }
+
+    const { error } = await supabaseClient
+        .from("reservation_applications")
+        .upsert({
+            id: application.id,
+            record_id: application.recordId,
+            applicant_full_name: application.applicantFullName,
+            applicant_email: application.applicantEmail,
+            applicant_contact_number: application.applicantContactNumber,
+            deceased_full_name: application.deceasedFullName,
+            deceased_date_of_birth: application.deceasedDateOfBirth,
+            deceased_date_of_death: application.deceasedDateOfDeath,
+            preferred_burial_date: application.preferredBurialDate,
+            status: application.status,
+            created_at: application.createdAt
+        }, { onConflict: "id" });
+
+    if (error) {
+        console.warn("Unable to save reservation application to Supabase:", error.message);
+        return false;
+    }
+
+    return true;
+}
+
+function getReservationApplication(recordId) {
+    return reservationApplications.find((application) => application.recordId === recordId);
+}
+
+async function updateReservationApplicationStatus(application, status) {
+    application.status = status;
+    reservationApplications = reservationApplications.map((item) => item.id === application.id ? application : item);
+    saveReservationApplicationsToStorage();
+
+    if (supabaseClient) {
+        const { error } = await supabaseClient
+            .from("reservation_applications")
+            .update({ status })
+            .eq("id", application.id);
+        if (error) {
+            console.warn("Unable to update reservation application in Supabase:", error.message);
+        }
+    }
+}
 
 function getRecentSearches() {
     try {
@@ -1328,6 +1429,7 @@ function renderAdminReservations() {
             <td>${record.plot}</td>
             <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
             <td>
+                ${record.status === "Reserved" && getReservationApplication(record.id) ? `<button class="table-action-btn" data-action="view-application" data-record-id="${record.id}">View Application</button>` : ""}
                 <button class="table-action-btn" data-action="toggle-reservation" data-reservation-status="${record.status.toLowerCase()}" data-record-id="${record.id}">
                     ${record.status === "Reserved" ? "Release" : record.status === "Available" ? "Reserve" : "Locked"}
                 </button>
@@ -1352,18 +1454,126 @@ async function changeReservationStatus(recordId, newStatus) {
     updateDashboardStats();
 }
 
+function openReservationApplicationModal(recordId) {
+    const record = burialRecords.find((item) => item.id === recordId);
+    const modal = document.getElementById("reservationApplicationModal");
+    const form = document.getElementById("reservationApplicationForm");
+    if (!record || !modal || !form) {
+        return;
+    }
+
+    form.reset();
+    form.querySelectorAll("input:not([type=hidden]), button[type=submit]").forEach((element) => {
+        element.disabled = false;
+    });
+    document.querySelector(".application-note")?.classList.remove("visible");
+    document.getElementById("applicationRecordId").value = record.id;
+    document.getElementById("applicationDeceasedFullName").value = record.name || "";
+    modal.classList.remove("hidden");
+}
+
+function closeReservationApplicationModal() {
+    document.getElementById("reservationApplicationModal")?.classList.add("hidden");
+}
+
+async function submitReservationApplication(event) {
+    event.preventDefault();
+    const form = event.target;
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const recordId = document.getElementById("applicationRecordId").value;
+    const record = burialRecords.find((item) => item.id === recordId);
+    if (!record || record.status !== "Available") {
+        alert("This plot is no longer available.");
+        closeReservationApplicationModal();
+        return;
+    }
+
+    const application = {
+        id: `${recordId}-${Date.now()}`,
+        recordId,
+        applicantFullName: document.getElementById("applicationApplicantFullName").value.trim(),
+        applicantEmail: document.getElementById("applicationApplicantEmail").value.trim(),
+        applicantContactNumber: document.getElementById("applicationApplicantContactNumber").value.trim(),
+        deceasedFullName: document.getElementById("applicationDeceasedFullName").value.trim(),
+        deceasedDateOfBirth: document.getElementById("applicationDeceasedDateOfBirth").value,
+        deceasedDateOfDeath: document.getElementById("applicationDeceasedDateOfDeath").value,
+        preferredBurialDate: document.getElementById("applicationPreferredBurialDate").value,
+        status: "Pending",
+        createdAt: new Date().toISOString()
+    };
+
+    record.name = application.deceasedFullName;
+    record.status = "Reserved";
+    await saveReservationApplication(application);
+    await saveBurialRecords();
+    const completionMessage = form.querySelector(".application-note");
+    if (completionMessage) {
+        completionMessage.classList.add("visible");
+    }
+    form.querySelectorAll("input:not([type=hidden]), button[type=submit]").forEach((element) => {
+        element.disabled = true;
+    });
+    renderUserReservations();
+    renderAdminReservations();
+    updateDashboardStats();
+}
+
+function openReviewApplicationModal(recordId) {
+    const application = getReservationApplication(recordId);
+    const record = burialRecords.find((item) => item.id === recordId);
+    const modal = document.getElementById("reviewApplicationModal");
+    if (!application || !record || !modal) {
+        return;
+    }
+
+    document.getElementById("reviewApplicantFullName").textContent = application.applicantFullName;
+    document.getElementById("reviewApplicantEmail").textContent = application.applicantEmail;
+    document.getElementById("reviewApplicantContactNumber").textContent = application.applicantContactNumber;
+    document.getElementById("reviewDeceasedFullName").textContent = application.deceasedFullName;
+    document.getElementById("reviewDeceasedDateOfBirth").textContent = application.deceasedDateOfBirth;
+    document.getElementById("reviewDeceasedDateOfDeath").textContent = application.deceasedDateOfDeath;
+    document.getElementById("reviewPreferredBurialDate").textContent = application.preferredBurialDate;
+    document.getElementById("reviewApplicationStatus").textContent = application.status;
+    modal.dataset.applicationId = application.id;
+    modal.classList.remove("hidden");
+}
+
+function closeReviewApplicationModal() {
+    document.getElementById("reviewApplicationModal")?.classList.add("hidden");
+}
+
+async function reviewReservationApplication(status) {
+    const modal = document.getElementById("reviewApplicationModal");
+    const application = reservationApplications.find((item) => item.id === modal?.dataset.applicationId);
+    if (!application) {
+        return;
+    }
+
+    await updateReservationApplicationStatus(application, status);
+    if (status === "Rejected") {
+        const record = burialRecords.find((item) => item.id === application.recordId);
+        if (record) {
+            record.status = "Available";
+            record.name = "";
+            await saveBurialRecords();
+        }
+    }
+    closeReviewApplicationModal();
+    renderAdminReservations();
+    renderUserReservations();
+}
+
 async function reserveBurialRecord(recordId) {
     const record = burialRecords.find((item) => item.id === recordId);
     if (!record || record.status !== "Available") {
         return;
     }
 
-    record.status = "Reserved";
-    await saveBurialRecords();
-    renderUserReservations();
-    renderAdminReservations();
-    updateDashboardStats();
-    alert(`Plot ${record.plot} has been reserved successfully.`);
+    openReservationApplicationModal(recordId);
 }
 
 async function toggleReservationForAdmin(recordId) {
@@ -1414,8 +1624,15 @@ function initializeUserReservations() {
 
     const searchInput = document.getElementById("reservationSearchInput");
     const tableBody = document.getElementById("reservationUserTableBody");
+    const applicationForm = document.getElementById("reservationApplicationForm");
+    const closeApplicationButton = document.getElementById("closeReservationApplicationModal");
+    const cancelApplicationButton = document.getElementById("cancelReservationApplicationBtn");
 
     renderUserReservations();
+
+    applicationForm?.addEventListener("submit", submitReservationApplication);
+    closeApplicationButton?.addEventListener("click", closeReservationApplicationModal);
+    cancelApplicationButton?.addEventListener("click", closeReservationApplicationModal);
 
     if (searchInput) {
         searchInput.addEventListener("input", (event) => filterReservationRows("reservationUserTableBody", event.target.value));
@@ -1450,8 +1667,15 @@ function initializeAdminReservations() {
 
     const searchInput = document.getElementById("reservationAdminSearchInput");
     const tableBody = document.getElementById("reservationsAdminTableBody");
+    const closeReviewButton = document.getElementById("closeReviewApplicationModal");
+    const acceptButton = document.getElementById("acceptReservationApplicationBtn");
+    const rejectButton = document.getElementById("rejectReservationApplicationBtn");
 
     renderAdminReservations();
+
+    closeReviewButton?.addEventListener("click", closeReviewApplicationModal);
+    acceptButton?.addEventListener("click", () => reviewReservationApplication("Accepted"));
+    rejectButton?.addEventListener("click", () => reviewReservationApplication("Rejected"));
 
     if (searchInput) {
         searchInput.addEventListener("input", (event) => filterReservationRows("reservationsAdminTableBody", event.target.value));
@@ -1473,6 +1697,8 @@ function initializeAdminReservations() {
             const recordId = button.dataset.recordId;
             if (action === "toggle-reservation") {
                 await toggleReservationForAdmin(recordId);
+            } else if (action === "view-application") {
+                openReviewApplicationModal(recordId);
             }
         });
     }
@@ -1900,6 +2126,7 @@ function initializeAdminDashboard() {
 
 document.addEventListener("DOMContentLoaded", async () => {
     burialRecords = await loadBurialRecords();
+    await loadReservationApplications();
     updateDashboardStats();
     initializeBurialSearch();
     initializeAdminDashboard();

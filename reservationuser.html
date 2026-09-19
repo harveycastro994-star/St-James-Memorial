@@ -292,6 +292,32 @@ GIS-Based Burial Site Mapping and Record Management System
 
 </div>
 
+<div id="reservationApplicationModal" class="modal hidden">
+<div class="modal-content">
+<div class="modal-header">
+<h3>Reservation Application</h3>
+<button class="modal-close" id="closeReservationApplicationModal" type="button" aria-label="Close application form">×</button>
+</div>
+<form id="reservationApplicationForm" class="record-form">
+<input type="hidden" id="applicationRecordId">
+<h4>Applicant Information</h4>
+<label>Full Name<input type="text" id="applicationApplicantFullName" required></label>
+<label>Email<input type="email" id="applicationApplicantEmail" required></label>
+<label>Contact Number<input type="tel" id="applicationApplicantContactNumber" required></label>
+<h4>Deceased Information</h4>
+<label>Full Name<input type="text" id="applicationDeceasedFullName" required></label>
+<label>Date of Birth<input type="date" id="applicationDeceasedDateOfBirth" required></label>
+<label>Date of Death<input type="date" id="applicationDeceasedDateOfDeath" required></label>
+<label>Preferred Burial Date<input type="date" id="applicationPreferredBurialDate" required></label>
+<p class="application-note">Application complete. Submit the documents onsite.</p>
+<div class="form-actions">
+<button type="submit" class="add-btn">Submit Application</button>
+<button type="button" class="secondary-btn" id="cancelReservationApplicationBtn">Cancel</button>
+</div>
+</form>
+</div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="script.js"></script>
 
