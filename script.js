@@ -275,6 +275,7 @@ const RECENT_SEARCHES_KEY = "recentBurialSearches";
 const GRAVE_CONDITION_NOTIFICATIONS_KEY = "graveConditionNotifications";
 const CURRENT_USER_KEY = "stjamesCurrentUser";
 const RECENT_BURIAL_ACTIVITY_KEY = "recentBurialActivityLog";
+const MAX_RECENT_ITEMS = 5;
 const RESERVATION_APPLICATIONS_KEY = "stjamesReservationApplications";
 let reservationApplications = [];
 let cemeteryMap = null;
@@ -394,7 +395,8 @@ async function updateReservationApplicationStatus(application, status) {
 
 function getRecentSearches() {
     try {
-        return JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY) || "[]");
+        const searches = JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY) || "[]");
+        return Array.isArray(searches) ? searches.slice(0, MAX_RECENT_ITEMS) : [];
     } catch (error) {
         return [];
     }
@@ -402,7 +404,8 @@ function getRecentSearches() {
 
 function saveRecentSearches(searches) {
     try {
-        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(searches));
+        const limitedSearches = Array.isArray(searches) ? searches.slice(0, MAX_RECENT_ITEMS) : [];
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(limitedSearches));
     } catch (error) {
         console.warn("Unable to save recent searches:", error);
     }
@@ -410,7 +413,8 @@ function saveRecentSearches(searches) {
 
 function getGraveConditionNotifications() {
     try {
-        return JSON.parse(localStorage.getItem(GRAVE_CONDITION_NOTIFICATIONS_KEY) || "[]");
+        const notifications = JSON.parse(localStorage.getItem(GRAVE_CONDITION_NOTIFICATIONS_KEY) || "[]");
+        return Array.isArray(notifications) ? notifications.slice(0, MAX_RECENT_ITEMS) : [];
     } catch (error) {
         console.warn("Unable to load grave condition notifications:", error);
         return [];
@@ -419,7 +423,8 @@ function getGraveConditionNotifications() {
 
 function saveGraveConditionNotifications(notifications) {
     try {
-        localStorage.setItem(GRAVE_CONDITION_NOTIFICATIONS_KEY, JSON.stringify(notifications));
+        const limitedNotifications = Array.isArray(notifications) ? notifications.slice(0, MAX_RECENT_ITEMS) : [];
+        localStorage.setItem(GRAVE_CONDITION_NOTIFICATIONS_KEY, JSON.stringify(limitedNotifications));
     } catch (error) {
         console.warn("Unable to save grave condition notifications:", error);
     }
@@ -448,7 +453,7 @@ async function getGraveConditionNotificationsFromSupabase() {
         oldCondition: item.old_condition,
         newCondition: item.new_condition,
         timestamp: item.created_at ? new Date(item.created_at).getTime() : Date.now()
-    }));
+    })).slice(0, MAX_RECENT_ITEMS);
 }
 
 async function saveGraveConditionNotificationToSupabase(notification) {
@@ -488,7 +493,7 @@ async function addGraveConditionNotification(record, oldCondition, newCondition)
         timestamp: Date.now(),
     };
 
-    const updatedNotifications = [notification, ...notifications].slice(0, 5);
+    const updatedNotifications = [notification, ...notifications].slice(0, MAX_RECENT_ITEMS);
     saveGraveConditionNotifications(updatedNotifications);
     await saveGraveConditionNotificationToSupabase(notification);
 }
@@ -520,7 +525,8 @@ async function renderConditionNotifications() {
 
     const supabaseNotifications = await getGraveConditionNotificationsFromSupabase();
     const notifications = (supabaseNotifications || getGraveConditionNotifications())
-        .filter(notificationBelongsToCurrentUser);
+        .filter(notificationBelongsToCurrentUser)
+        .slice(0, MAX_RECENT_ITEMS);
     const count = notifications.length;
 
     if (badgeElement) {
@@ -957,7 +963,7 @@ function renderRecentSearches() {
         return;
     }
 
-    const searches = getRecentSearches();
+    const searches = getRecentSearches().slice(0, MAX_RECENT_ITEMS);
 
     if (searches.length === 0) {
         listElement.innerHTML = `
@@ -987,7 +993,7 @@ function renderRecentSearches() {
 
 function addRecentSearch(record) {
     const searches = getRecentSearches();
-    const updatedSearches = [record, ...searches.filter((item) => item.name !== record.name)].slice(0, 5);
+    const updatedSearches = [record, ...searches.filter((item) => item.name !== record.name)].slice(0, MAX_RECENT_ITEMS);
     saveRecentSearches(updatedSearches);
     renderRecentSearches();
 }
