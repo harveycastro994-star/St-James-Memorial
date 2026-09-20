@@ -1352,15 +1352,28 @@ function updateUserReservationStats() {
     const reservedCount = document.getElementById("userReservedCount");
     const availableCount = document.getElementById("userAvailableCount");
     const occupiedCount = document.getElementById("userOccupiedCount");
+    const reservedCard = reservedCount?.closest(".stat-card");
+    const occupiedCard = occupiedCount?.closest(".stat-card");
+    const availableCard = availableCount?.closest(".stat-card");
 
     if (reservedCount) {
-        reservedCount.textContent = counts.reserved.toString();
+        reservedCount.textContent = "0";
+    }
+    if (occupiedCount) {
+        occupiedCount.textContent = "0";
     }
     if (availableCount) {
         availableCount.textContent = counts.available.toString();
     }
-    if (occupiedCount) {
-        occupiedCount.textContent = counts.occupied.toString();
+
+    if (reservedCard) {
+        reservedCard.style.display = "none";
+    }
+    if (occupiedCard) {
+        occupiedCard.style.display = "none";
+    }
+    if (availableCard) {
+        availableCard.style.display = "flex";
     }
 }
 
@@ -1397,20 +1410,30 @@ function renderUserReservations() {
 
     const availableRecords = burialRecords.filter((record) => record.status === "Available");
 
-    tableBody.innerHTML = availableRecords.map((record) => `
-        <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}">
-            <td>${record.id}</td>
-            <td>${getDisplayName(record)}</td>
-            <td>${record.block.replace("Block ", "")}</td>
-            <td>${record.plot}</td>
-            <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
-            <td>
-                <button class="table-action-btn" data-action="reservation" data-reservation-status="available" data-record-id="${record.id}">
-                    Reserve
-                </button>
-            </td>
-        </tr>
-    `).join("");
+    if (availableRecords.length === 0) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 20px; color: #64748b;">
+                    No available plots at the moment.
+                </td>
+            </tr>
+        `;
+    } else {
+        tableBody.innerHTML = availableRecords.map((record) => `
+            <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}">
+                <td>${record.id}</td>
+                <td>${getDisplayName(record)}</td>
+                <td>${record.block.replace("Block ", "")}</td>
+                <td>${record.plot}</td>
+                <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
+                <td>
+                    <button class="table-action-btn" data-action="reservation" data-reservation-status="available" data-record-id="${record.id}">
+                        Reserve
+                    </button>
+                </td>
+            </tr>
+        `).join("");
+    }
 
     updateUserReservationStats();
 }

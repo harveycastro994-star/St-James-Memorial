@@ -459,7 +459,8 @@ RESPONSIVE
 .topbar-right{
     display:flex;
     align-items:center;
-    gap:24px;
+    gap:16px;
+    flex-wrap:nowrap;
 }
 
 .topbar-right button{
@@ -472,10 +473,24 @@ RESPONSIVE
     box-shadow:0 3px 10px rgba(0,0,0,.08);
 }
 
+.topbar-right .notification-btn{
+    width:auto;
+    height:auto;
+    min-height:48px;
+    padding:10px 16px;
+    border-radius:9999px;
+    white-space:nowrap;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
+}
+
 .admin-profile{
     display:flex;
     align-items:center;
     gap:12px;
+    flex-shrink:0;
 }
 
 .admin-profile img{
