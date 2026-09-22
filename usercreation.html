@@ -89,7 +89,21 @@
                 </label>
                 <label>
                     Password
-                    <input type="password" id="password" placeholder="Enter password" required>
+                    <span class="password-input-wrapper">
+                        <input type="password" id="password" placeholder="Enter password" required>
+                        <button type="button" class="password-toggle" data-password-target="password" aria-label="Show password" title="Show password">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </span>
+                </label>
+                <label>
+                    Confirm Password
+                    <span class="password-input-wrapper">
+                        <input type="password" id="confirmPassword" placeholder="Confirm password" required>
+                        <button type="button" class="password-toggle" data-password-target="confirmPassword" aria-label="Show password" title="Show password">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </span>
                 </label>
                 <label>
                     Account Role
@@ -360,12 +374,20 @@
             const fullName = document.getElementById("fullName").value.trim();
             const username = document.getElementById("username").value.trim();
             const password = document.getElementById("password").value;
+            const confirmPassword = document.getElementById("confirmPassword").value;
             const role = document.getElementById("role").value;
             const message = document.getElementById("formMessage");
 
-            if (!fullName || !username || !password || !role) {
+            if (!fullName || !username || !password || !confirmPassword || !role) {
                 message.textContent = "Please complete all fields.";
                 message.className = "form-message error";
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                message.textContent = "Password and confirm password do not match.";
+                message.className = "form-message error";
+                document.getElementById("confirmPassword").focus();
                 return;
             }
 
@@ -435,6 +457,19 @@
         });
 
         document.getElementById("role").addEventListener("change", populateGraveSelection);
+
+        document.querySelectorAll(".password-toggle").forEach((toggleButton) => {
+            toggleButton.addEventListener("click", () => {
+                const passwordInput = document.getElementById(toggleButton.dataset.passwordTarget);
+                const icon = toggleButton.querySelector("i");
+                const isHidden = passwordInput.type === "password";
+
+                passwordInput.type = isHidden ? "text" : "password";
+                toggleButton.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+                toggleButton.title = isHidden ? "Hide password" : "Show password";
+                icon.className = isHidden ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+            });
+        });
 
         renderAccounts();
         populateGraveSelection();

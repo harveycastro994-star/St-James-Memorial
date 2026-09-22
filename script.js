@@ -573,6 +573,7 @@ function updateBurialDetails(record) {
 
     if (!record) {
         selectedBurialRecord = null;
+        focusBurialOnMap(null);
         nameElement.textContent = "No matching record found";
         blockElement.textContent = "-";
         plotElement.textContent = "-";
@@ -592,6 +593,65 @@ function updateBurialDetails(record) {
     if (record.lat !== undefined && record.lng !== undefined) {
         focusBurialOnMap(record);
     }
+}
+
+function renderProfileSidebar(record) {
+    const currentUser = getCurrentUser() || {};
+    const setValue = (id, value) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value || "-";
+        }
+    };
+
+    const userName = currentUser.name || currentUser.username || "Visitor";
+    const access = currentUser.role === "visitor" ? "Guest Access" : currentUser.role || "Guest Access";
+
+    setValue("profileHeaderName", userName);
+    setValue("profileUserName", userName);
+    setValue("profileUserUsername", currentUser.username || "-");
+    setValue("profileUserRole", access);
+    setValue("profileUserAccess", access);
+    setValue("profileDeceasedName", record?.name || "No assigned record");
+    setValue("profileDeceasedDate", record?.date || "-");
+    setValue("profileDeceasedStatus", record?.status || "-");
+    setValue("profilePlotBlock", record?.block || currentUser.grave?.block || "-");
+    setValue("profilePlotNumber", record?.plot || currentUser.grave?.plot || "-");
+    setValue("profilePlotCondition", record?.cleanliness || "-");
+}
+
+function initializeProfileSidebar() {
+    const profileButton = document.getElementById("profileButton");
+    const profileSidebar = document.getElementById("profileSidebar");
+    const profileBackdrop = document.getElementById("profileBackdrop");
+    const closeButton = document.getElementById("closeProfileButton");
+
+    if (!profileButton || !profileSidebar || !profileBackdrop) {
+        return;
+    }
+
+    const currentUser = getCurrentUser() || {};
+    const assignedRecord = currentUser.grave
+        ? burialRecords.find((item) => item.block === currentUser.grave.block && item.plot === currentUser.grave.plot)
+        : null;
+
+    renderProfileSidebar(assignedRecord);
+
+    const setOpenState = (isOpen) => {
+        profileSidebar.classList.toggle("is-open", isOpen);
+        profileSidebar.setAttribute("aria-hidden", String(!isOpen));
+        profileButton.setAttribute("aria-expanded", String(isOpen));
+        profileBackdrop.hidden = !isOpen;
+    };
+
+    profileButton.addEventListener("click", () => setOpenState(true));
+    closeButton?.addEventListener("click", () => setOpenState(false));
+    profileBackdrop.addEventListener("click", () => setOpenState(false));
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            setOpenState(false);
+        }
+    });
 }
 
 function createCemeteryLocationIcon() {
@@ -661,7 +721,7 @@ function renderMapMarkers() {
         if (!cemeteryMarkersLayer) {
             cemeteryMarkersLayer = L.layerGroup().addTo(cemeteryMap);
         }
-        renderBurialMarkers(cemeteryMap, cemeteryMarkersLayer, burialRecords);
+        cemeteryMarkersLayer.clearLayers();
     }
 
     if (adminMap) {
@@ -706,7 +766,6 @@ function initializeMap() {
     }, 200);
 
     renderMapMarkers();
-    focusBurialOnMap(burialRecords[0]);
 
     const locationButton = document.getElementById("useUserCurrentLocationBtn");
     const accuracyElement = document.getElementById("userGpsAccuracy");
@@ -2005,12 +2064,9 @@ function initializeBurialSearch() {
     const navigateButton = document.getElementById("navigateToGraveBtn");
 
     initializeMap();
-    const initialRecord = burialRecords[0];
-    if (initialRecord) {
-        updateBurialDetails(initialRecord);
-    }
     renderRecentSearches();
     renderConditionNotifications();
+    initializeProfileSidebar();
 
     if (searchButton) {
         searchButton.addEventListener("click", searchBurialRecord);

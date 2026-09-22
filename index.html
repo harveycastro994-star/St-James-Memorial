@@ -252,6 +252,7 @@ if(authenticateUser(username,password,"visitor")){
 
 const account = authenticateUser(username, password, "visitor");
 sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({
+name: account.name,
 username: account.username,
 role: account.role,
 grave: account.grave || null

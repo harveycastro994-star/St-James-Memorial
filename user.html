@@ -124,23 +124,71 @@ MAIN CONTENT
     <span id="notificationBadge" class="notification-badge"></span>
 </button>
 
-<div class="admin-profile">
+<button class="admin-profile profile-trigger" id="profileButton" type="button" aria-controls="profileSidebar" aria-expanded="false">
 
 <img src="images/profile.png">
 
 <div>
 
-<h4>Visitor</h4>
+<h4 id="profileHeaderName">Visitor</h4>
 
 <span>Guest Access</span>
 
 </div>
 
-</div>
+</button>
 
 </div>
 
 </header>
+
+<div class="profile-backdrop" id="profileBackdrop" hidden></div>
+
+<aside class="profile-sidebar" id="profileSidebar" aria-labelledby="profileSidebarTitle" aria-hidden="true">
+    <div class="profile-sidebar-header">
+        <div>
+            <span class="profile-eyebrow">Visitor profile</span>
+            <h2 id="profileSidebarTitle">Your Memorial Park Details</h2>
+        </div>
+        <button class="profile-close-btn" id="closeProfileButton" type="button" aria-label="Close profile sidebar">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>
+
+    <div class="profile-identity">
+        <img src="images/profile.png" alt="Visitor profile">
+        <div>
+            <h3 id="profileUserName">Visitor</h3>
+            <p id="profileUserRole">Guest Access</p>
+        </div>
+    </div>
+
+    <section class="profile-info-section">
+        <h3><i class="fa-solid fa-user"></i> User information</h3>
+        <dl class="profile-details">
+            <div><dt>Username</dt><dd id="profileUserUsername">-</dd></div>
+            <div><dt>Access</dt><dd id="profileUserAccess">Guest Access</dd></div>
+        </dl>
+    </section>
+
+    <section class="profile-info-section">
+        <h3><i class="fa-solid fa-cross"></i> Deceased person</h3>
+        <dl class="profile-details">
+            <div><dt>Name</dt><dd id="profileDeceasedName">No assigned record</dd></div>
+            <div><dt>Date of burial</dt><dd id="profileDeceasedDate">-</dd></div>
+            <div><dt>Status</dt><dd id="profileDeceasedStatus">-</dd></div>
+        </dl>
+    </section>
+
+    <section class="profile-info-section">
+        <h3><i class="fa-solid fa-location-dot"></i> Owned plot</h3>
+        <dl class="profile-details">
+            <div><dt>Block</dt><dd id="profilePlotBlock">-</dd></div>
+            <div><dt>Plot number</dt><dd id="profilePlotNumber">-</dd></div>
+            <div><dt>Condition</dt><dd id="profilePlotCondition">-</dd></div>
+        </dl>
+    </section>
+</aside>
 
 <section class="page-header">
 
