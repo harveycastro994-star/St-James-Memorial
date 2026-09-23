@@ -145,30 +145,12 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
-        const USER_STORAGE_KEY = "stjamesUserAccounts";
         const supabaseUrl = "https://ouzfgihgrlssdsqupxit.supabase.co";
         const supabaseKey = "sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm";
         const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
 
-        function getStoredUsers() {
-            try {
-                const saved = JSON.parse(localStorage.getItem(USER_STORAGE_KEY) || "null");
-                if (Array.isArray(saved) && saved.length > 0) {
-                    return saved;
-                }
-            } catch (error) {
-                console.warn("Unable to read user accounts:", error);
-            }
-
-            return [
-                { id: 1, name: "Administrator", username: "admin", password: "admin123", role: "admin" },
-                { id: 2, name: "Visitor", username: "visitor", password: "visitor123", role: "visitor" }
-            ];
-        }
-
-        function saveStoredUsers(users) {
-            localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(users));
-        }
+        let userAccounts = [];
+        let userCreationBurialRecords = [];
 
         async function loadUsersFromSupabase() {
             const { data, error } = await supabaseClient
@@ -178,13 +160,13 @@
 
             if (error) {
                 console.warn("Unable to load user accounts from Supabase:", error.message);
+                userAccounts = [];
+                renderAccounts([]);
                 return;
             }
 
-            if (Array.isArray(data) && data.length > 0) {
-                saveStoredUsers(data);
-                renderAccounts();
-            }
+            userAccounts = Array.isArray(data) ? data : [];
+            renderAccounts(userAccounts);
         }
 
         async function saveUserToSupabase(account) {
@@ -229,27 +211,37 @@
             }
         }
 
-        function getBurialRecords() {
-            try {
-                const saved = JSON.parse(localStorage.getItem("stjames.db") || "null");
-                if (Array.isArray(saved) && saved.length > 0) {
-                    return saved;
-                }
-            } catch (error) {
-                console.warn("Unable to read burial records:", error);
+        async function getBurialRecordsFromSupabase() {
+            const { data, error } = await supabaseClient
+                .from("burial_records")
+                .select("*")
+                .order("id");
+
+            if (error) {
+                console.warn("Unable to load burial records for account creation:", error.message);
+                return [];
             }
 
-            return [
-                { id: "001", name: "Clance Yhvan Cruz", block: "Block A", plot: "A-024", date: "January 15, 2025", status: "Occupied", cleanliness: "Clean", lat: 14.5995, lng: 120.9842 },
-                { id: "002", name: "Maria Elena Santos", block: "Block C", plot: "C-015", date: "February 3, 2025", status: "Occupied", cleanliness: "Dirty", lat: 14.6004, lng: 120.9831 },
-                { id: "003", name: "Juan Dela Cruz", block: "Block D", plot: "D-010", date: "March 12, 2025", status: "Reserved", cleanliness: "Clean", lat: 14.5988, lng: 120.9853 },
-                { id: "004", name: "Rosa B. Fernandez", block: "Block B", plot: "B-007", date: "April 18, 2025", status: "Available", cleanliness: "Dirty", lat: 14.6011, lng: 120.9860 },
-                { id: "005", name: "Emilio R. Torres", block: "Block E", plot: "E-021", date: "May 5, 2025", status: "Occupied", cleanliness: "Clean", lat: 14.5979, lng: 120.9838 }
-            ];
+            return Array.isArray(data) ? data : [];
         }
 
-        function saveBurialRecords(records) {
-            localStorage.setItem("stjames.db", JSON.stringify(records));
+        async function loadBurialRecordsForUserCreation() {
+            userCreationBurialRecords = await getBurialRecordsFromSupabase();
+            populateGraveSelection();
+        }
+
+        async function saveBurialRecords(records) {
+            if (!Array.isArray(records) || records.length === 0) {
+                return;
+            }
+
+            const { error } = await supabaseClient
+                .from("burial_records")
+                .upsert(records, { onConflict: "id" });
+
+            if (error) {
+                console.warn("Unable to save burial records from account creation:", error.message);
+            }
         }
 
         function populateGraveSelection() {
@@ -267,11 +259,13 @@
                 return;
             }
 
-            const records = getBurialRecords();
-            const allGraves = records.map((record) => ({
-                value: `${record.block}|${record.plot}|${record.id}`,
-                label: `${record.block} - Plot ${record.plot} (${record.status})`
-            }));
+            const records = userCreationBurialRecords;
+            const allGraves = records
+                .filter((record) => record.status === "Available")
+                .map((record) => ({
+                    value: `${record.block}|${record.plot}|${record.id}`,
+                    label: `${record.block} - Plot ${record.plot} (${record.status})`
+                }));
 
             graveSelect.innerHTML = "";
 
@@ -291,7 +285,11 @@
         }
 
         async function assignVisitorGrave(fullName, selectedGraveValue) {
-            const records = getBurialRecords();
+            const records = userCreationBurialRecords;
+            if (!Array.isArray(records) || records.length === 0) {
+                return null;
+            }
+
             let selectedRecord = null;
 
             if (selectedGraveValue) {
@@ -312,9 +310,9 @@
             selectedRecord.status = "Reserved";
             selectedRecord.date = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
-            saveBurialRecords(records);
+            await saveBurialRecords(records);
+            userCreationBurialRecords = records;
 
-            const notifications = JSON.parse(localStorage.getItem("graveConditionNotifications") || "[]");
             const notification = {
                 id: `grave-${Date.now()}`,
                 name: fullName,
@@ -324,8 +322,7 @@
                 newCondition: "Assigned",
                 timestamp: Date.now()
             };
-            notifications.unshift(notification);
-            localStorage.setItem("graveConditionNotifications", JSON.stringify(notifications.slice(0, 5)));
+
             await saveAssignmentNotificationToSupabase(notification);
 
             return {
@@ -334,8 +331,7 @@
             };
         }
 
-        function renderAccounts() {
-            const accounts = getStoredUsers();
+        function renderAccounts(accounts = []) {
             const body = document.getElementById("accountTableBody");
             body.innerHTML = "";
 
@@ -359,10 +355,8 @@
         }
 
         async function deleteAccount(id) {
-            const updatedAccounts = getStoredUsers().filter((account) => account.id !== id);
-            saveStoredUsers(updatedAccounts);
             await deleteUserFromSupabase(id);
-            renderAccounts();
+            await loadUsersFromSupabase();
             const message = document.getElementById("formMessage");
             message.textContent = "Account deleted.";
             message.className = "form-message success";
@@ -391,7 +385,7 @@
                 return;
             }
 
-            const accounts = getStoredUsers();
+            const accounts = userAccounts.slice();
             const usernameExists = accounts.some((account) => account.username.toLowerCase() === username.toLowerCase());
 
             if (usernameExists) {
@@ -399,6 +393,14 @@
                 message.className = "form-message error";
                 return;
             }
+
+            let newAccount = {
+                id: Date.now(),
+                name: fullName,
+                username,
+                password,
+                role
+            };
 
             if (role === "visitor") {
                 const selectedGraveValue = document.getElementById("graveSelection").value;
@@ -415,44 +417,24 @@
                     return;
                 }
 
-                accounts.push({
-                    id: Date.now(),
-                    name: fullName,
-                    username,
-                    password,
-                    role,
+                newAccount = {
+                    ...newAccount,
                     grave: assignedGrave
-                });
-
-                const newAccount = accounts[accounts.length - 1];
-                saveStoredUsers(accounts);
-                const savedToSupabase = await saveUserToSupabase(newAccount);
-                renderAccounts();
-                this.reset();
-                document.getElementById("graveSelectionWrapper").style.display = "none";
-                message.textContent = savedToSupabase
-                    ? `Account created successfully. Grave assigned: ${assignedGrave.block} ${assignedGrave.plot}`
-                    : "Account saved locally, but not to Supabase. Check the browser console.";
-                message.className = "form-message success";
-                return;
+                };
             }
 
-            accounts.push({
-                id: Date.now(),
-                name: fullName,
-                username,
-                password,
-                role
-            });
-
-            const newAccount = accounts[accounts.length - 1];
-            saveStoredUsers(accounts);
             const savedToSupabase = await saveUserToSupabase(newAccount);
-            renderAccounts();
+            if (savedToSupabase) {
+                await loadUsersFromSupabase();
+            }
+
             this.reset();
+            document.getElementById("graveSelectionWrapper").style.display = "none";
             message.textContent = savedToSupabase
-                ? "Account created successfully."
-                : "Account saved locally, but not to Supabase. Check the browser console.";
+                ? (role === "visitor"
+                    ? `Account created successfully. Grave assigned: ${newAccount.grave.block} ${newAccount.grave.plot}`
+                    : "Account created successfully.")
+                : "Account could not be saved to Supabase.";
             message.className = savedToSupabase ? "form-message success" : "form-message error";
         });
 
@@ -472,7 +454,7 @@
         });
 
         renderAccounts();
-        populateGraveSelection();
+        loadBurialRecordsForUserCreation();
         loadUsersFromSupabase();
     </script>
 </body>
