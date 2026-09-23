@@ -66,7 +66,10 @@
                 Please choose your account type.
             </p>
 
-            <div class="role admin" onclick="showAdmin()">
+            <div 
+                class="role admin" 
+                onclick="showAdmin()"
+            >
 
                 <i class="fa-solid fa-user-shield"></i>
 
@@ -80,7 +83,10 @@
 
             </div>
 
-            <div class="role visitor" onclick="showVisitor()">
+            <div
+                class="role visitor" 
+                onclick="showVisitor()"
+            >
 
                 <i class="fa-solid fa-users"></i>
 
@@ -97,9 +103,16 @@
 
         <!-- LOGIN -->
 
-        <div class="card login-card" id="loginPage">
+        <div 
+            class="card login-card" 
+            id="loginPage"
+>
 
-            <button class="backBtn" onclick="goBack()">
+            <button 
+                type="button"
+                class="backBtn" 
+                onclick="goBack()"
+            >
 
                 <i class="fa-solid fa-arrow-left"></i>
 
@@ -111,7 +124,7 @@
 
             <p id="loginDescription"></p>
 
-            <form>
+            <form id="loginForm">
 
                 <div class="inputBox">
 
@@ -120,7 +133,11 @@
                     <input
                     type="text"
                     id="username"
-                    placeholder="Username">
+                    placeholder="Username"
+                    autocomplete="username"
+                    required
+                    >
+                    
 
                 </div>
 
@@ -131,11 +148,18 @@
                     <input
                     type="password"
                     id="password"
-                    placeholder="Password">
+                    placeholder="Password"
+                    autocomplete="current-password"
+                    required
+                    >
 
                 </div>
 
-                <button type="button" class="loginButton" id="loginButton">
+                <button 
+                    type="button"
+                    class="loginButton" 
+                    id="loginButton"
+                >
                     LOGIN
                 </button>
 
@@ -146,9 +170,18 @@
     </div>
 
 </div>
-
+<!-- SUPABASE -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-
+/* =========================================
+       SUPABASE CONFIGURATION
+========================================= */
+    const supabaseUrl="https://ouzfgihgrlssdsqupxit.supabase.co";
+    const supabaseKey="sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm";
+    const supabaseClient=window.supabase.createClient(supabaseUrl,supabaseKey);
+/* =========================================
+       ELEMENTS
+========================================= */
 const rolePage=document.getElementById("rolePage");
 
 const loginPage=document.getElementById("loginPage");
@@ -159,46 +192,48 @@ const loginDescription=document.getElementById("loginDescription");
 
 const loginButton=document.getElementById("loginButton");
 
+const loginForm =document.getElementById("loginForm");
+/* =========================================
+       VARIABLES
+========================================= */
+let selectedRole = null;
+/* =========================================
+       INITIAL STATE
+========================================= */
 loginPage.style.display="none";
 
-const USER_STORAGE_KEY="stjamesUserAccounts";
-const supabaseUrl="https://ouzfgihgrlssdsqupxit.supabase.co";
-const supabaseKey="sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm";
-const supabaseClient=window.supabase.createClient(supabaseUrl,supabaseKey);
-    
-function getStoredUsers(){
+/* =========================================
+       AUTHENTICATE USER USING SUPABASE
+========================================= */
 
-try{
+async function authenticateUser(
+    username,
+    password,
+    role
+){
 
-const saved=JSON.parse(localStorage.getItem(USER_STORAGE_KEY)||"null");
+const normalizedUsername=
+    (username||"")
+        .trim()
+        .toLowerCase();
 
-if(Array.isArray(saved)&&saved.length>0){
+const {data,error}=await supabaseClient
+.from("user_accounts")
+.select("*")
+.ilike("username",normalizedUsername)
+.eq("password",password)
+.eq("role",role)
+.maybeSingle();
 
-return saved;
-
+if(!error&&data){
+return data;
 }
 
-}catch(error){
-
-console.warn("Unable to read user accounts:", error);
-
+if(error){
+console.warn("Unable to authenticate with Supabase:",error.message);
 }
 
-return[
-
-{id:1,name:"Administrator",username:"admin",password:"admin123",role:"admin"},
-
-{id:2,name:"Visitor",username:"visitor",password:"visitor123",role:"visitor"}
-
-];
-
-}
-
-function authenticateUser(username,password,role){
-
-const normalizedUsername=(username||"").trim().toLowerCase();
-
-return getStoredUsers().find((account)=>account.username.toLowerCase()===normalizedUsername && account.password===password && account.role===role);
+return null;
 
 }
 
@@ -212,16 +247,17 @@ loginTitle.innerHTML="Administrator Login";
 
 loginDescription.innerHTML="Authorized personnel only.";
 
-loginButton.onclick=function(e){
+loginButton.onclick=async function(e){
 
 e.preventDefault();
 
 const username=document.getElementById("username").value;
 const password=document.getElementById("password").value;
 
-if(authenticateUser(username,password,"admin")){
+const account=await authenticateUser(username,password,"admin");
+if(account){
 
-sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({ username: username.trim().toLowerCase(), role: "admin" }));
+sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({ name: account.name, username: account.username, role: account.role }));
 window.location.href="admin.html";
 
 }else{
@@ -244,16 +280,16 @@ loginTitle.innerHTML="Visitor Login";
 
 loginDescription.innerHTML="Locate and view burial information.";
 
-loginButton.onclick=function(e){
+loginButton.onclick=async function(e){
 
 e.preventDefault();
 
 const username=document.getElementById("username").value;
 const password=document.getElementById("password").value;
 
-if(authenticateUser(username,password,"visitor")){
+const account = await authenticateUser(username, password, "visitor");
+if(account){
 
-const account = authenticateUser(username, password, "visitor");
 sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({
 name: account.name,
 username: account.username,
