@@ -10,7 +10,7 @@ html {
 }
 
 body{
-    background: #f5f7f2;
+    background:url("../images/cemetery-bg.jpg") no-repeat center center/cover;
     min-height:100vh;
     overflow:hidden;
 }

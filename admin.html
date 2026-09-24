@@ -163,7 +163,7 @@ placeholder="Search deceased, block or plot...">
 
 <div class="admin-profile">
 
-<i class="fa-solid fa-user-shield" aria-hidden="true"></i>
+<img src="images/profile.png">
 
 <div>
 
@@ -482,23 +482,21 @@ GIS-Based Burial Site Mapping and Record Management System
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="script.js"></script>
 <script>
-    async function updateRegisteredVisitorsCount() {
+    const USER_STORAGE_KEY = "stjamesUserAccounts";
+
+    function updateRegisteredVisitorsCount() {
         try {
-            const { data, error } = await window.supabase
-                ? window.supabase.createClient("https://ouzfgihgrlssdsqupxit.supabase.co", "sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm")
-                    .from("user_accounts")
-                    .select("id")
-                    .eq("role", "visitor")
-                : { data: [], error: null };
-
-            if (error) {
-                console.warn("Unable to load registered visitors count:", error.message);
-                return;
-            }
-
+            const saved = JSON.parse(localStorage.getItem(USER_STORAGE_KEY) || "null");
+            const users = Array.isArray(saved)
+                ? saved
+                : [
+                    { id: 1, name: "Administrator", username: "admin", password: "admin123", role: "admin" },
+                    { id: 2, name: "Visitor", username: "visitor", password: "visitor123", role: "visitor" }
+                ];
+            const visitorCount = users.filter((user) => user.role === "visitor").length;
             const statsElement = document.getElementById("statsRegisteredVisitors");
             if (statsElement) {
-                statsElement.textContent = Array.isArray(data) ? data.length.toString() : "0";
+                statsElement.textContent = visitorCount;
             }
         } catch (error) {
             console.warn("Unable to update registered visitors count:", error);
