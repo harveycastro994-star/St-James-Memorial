@@ -5,158 +5,8 @@ const supabaseClient = window.supabase
     ? window.supabase.createClient(supabaseUrl, supabaseKey)
     : null;
 
-function login() {
-
-    const role = document.getElementById("role").value;
-    const username = document.getElementById("username").value;
-    const password = document.getElementById("password").value;
-
-    // Administrator
-    if(role === "admin"){
-
-        if(username === "admin" && password === "admin123"){
-
-            window.location.href = "admin.html";
-
-        }else{
-
-            alert("Invalid Administrator Username or Password.");
-
-        }
-
-    }
-
-    // Visitor
-    else if(role === "visitor"){
-
-        if(username === "visitor" && password === "visitor123"){
-
-            window.location.href = "user.html";
-
-        }else{
-
-            alert("Invalid Visitor Username or Password.");
-
-        }
-
-    }
-
-    else{
-
-        alert("Please select a role.");
-
-    }
-
-}
-
-const BURIAL_DB_KEY = "stjames.db";
-const INDEXEDDB_NAME = "StJamesMemorialParkDB";
-const INDEXEDDB_VERSION = 1;
-const INDEXEDDB_STORE = "burial_records";
-const defaultBurialRecords = [
-    { id: "001", name: "Clance Yhvan Cruz", block: "Block A", plot: "A-024", date: "January 15, 2025", status: "Occupied", cleanliness: "Clean", lat: 14.5995, lng: 120.9842 },
-    { id: "002", name: "Maria Elena Santos", block: "Block C", plot: "C-015", date: "February 3, 2025", status: "Occupied", cleanliness: "Dirty", lat: 14.6004, lng: 120.9831 },
-    { id: "003", name: "Juan Dela Cruz", block: "Block D", plot: "D-010", date: "March 12, 2025", status: "Reserved", cleanliness: "Clean", lat: 14.5988, lng: 120.9853 },
-    { id: "004", name: "Rosa B. Fernandez", block: "Block B", plot: "B-007", date: "April 18, 2025", status: "Available", cleanliness: "Dirty", lat: 14.6011, lng: 120.9860 },
-    { id: "005", name: "Emilio R. Torres", block: "Block E", plot: "E-021", date: "May 5, 2025", status: "Occupied", cleanliness: "Clean", lat: 14.5979, lng: 120.9838 }
-];
-
 let burialRecords = [];
 let editingRecordId = null;
-
-function openBurialDatabase() {
-    return new Promise((resolve) => {
-        if (typeof window === "undefined" || !window.indexedDB) {
-            resolve(null);
-            return;
-        }
-
-        const request = window.indexedDB.open(INDEXEDDB_NAME, INDEXEDDB_VERSION);
-
-        request.onupgradeneeded = () => {
-            const db = request.result;
-            if (!db.objectStoreNames.contains(INDEXEDDB_STORE)) {
-                db.createObjectStore(INDEXEDDB_STORE, { keyPath: "id" });
-            }
-        };
-
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => {
-            console.warn("Unable to open IndexedDB:", request.error);
-            resolve(null);
-        };
-        request.onblocked = () => {
-            console.warn("IndexedDB open blocked");
-            resolve(null);
-        };
-    });
-}
-
-function getBurialRecordsFromDB() {
-    return new Promise(async (resolve) => {
-        const db = await openBurialDatabase();
-        if (!db) {
-            resolve(null);
-            return;
-        }
-
-        const transaction = db.transaction(INDEXEDDB_STORE, "readonly");
-        const store = transaction.objectStore(INDEXEDDB_STORE);
-        const request = store.getAll();
-
-        request.onsuccess = () => resolve(request.result || []);
-        request.onerror = () => {
-            console.warn("Unable to read burial records from IndexedDB:", request.error);
-            resolve(null);
-        };
-    });
-}
-
-function saveBurialRecordsToDB(records) {
-    return new Promise(async (resolve) => {
-        const db = await openBurialDatabase();
-        if (!db) {
-            resolve();
-            return;
-        }
-
-        const transaction = db.transaction(INDEXEDDB_STORE, "readwrite");
-        const store = transaction.objectStore(INDEXEDDB_STORE);
-
-        const clearRequest = store.clear();
-        clearRequest.onerror = () => console.warn("Unable to clear IndexedDB store:", clearRequest.error);
-
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => {
-            console.warn("Unable to save burial records to IndexedDB:", transaction.error);
-            resolve();
-        };
-        transaction.onabort = () => resolve();
-
-        records.forEach((record) => {
-            store.put(record);
-        });
-    });
-}
-
-async function getBurialRecordsFromFile() {
-    if (typeof fetch !== "function") {
-        return null;
-    }
-
-    try {
-        const response = await fetch("stjames.db");
-        if (!response.ok) {
-            return null;
-        }
-
-        const records = await response.json();
-        return Array.isArray(records) ? records : null;
-    } catch (error) {
-        console.warn("Unable to load burial records from stjames.db:", error);
-        return null;
-    }
-}
 
 async function getBurialRecordsFromSupabase() {
     if (!supabaseClient) {
@@ -205,78 +55,24 @@ async function deleteBurialRecordFromSupabase(recordId) {
     }
 }
 
-function downloadBurialDatabaseFile() {
-    const blob = new Blob([JSON.stringify(burialRecords, null, 4)], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "stjames.db";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-}
-
 async function loadBurialRecords() {
     try {
         const supabaseRecords = await getBurialRecordsFromSupabase();
-        if (Array.isArray(supabaseRecords) && supabaseRecords.length > 0) {
-            await saveBurialRecordsToDB(supabaseRecords);
-            localStorage.setItem(BURIAL_DB_KEY, JSON.stringify(supabaseRecords));
+        if (Array.isArray(supabaseRecords)) {
             return supabaseRecords;
-        }
-
-        const dbRecords = await getBurialRecordsFromDB();
-        if (Array.isArray(dbRecords) && dbRecords.length > 0) {
-            return dbRecords;
-        }
-
-        const storedRecords = JSON.parse(localStorage.getItem(BURIAL_DB_KEY) || "null");
-        if (Array.isArray(storedRecords) && storedRecords.length > 0) {
-            await saveBurialRecordsToDB(storedRecords);
-            return storedRecords;
-        }
-
-        const fileRecords = await getBurialRecordsFromFile();
-        if (Array.isArray(fileRecords) && fileRecords.length > 0) {
-            await saveBurialRecordsToDB(fileRecords);
-            try {
-                localStorage.setItem(BURIAL_DB_KEY, JSON.stringify(fileRecords));
-            } catch (error) {
-                console.warn("Unable to save file-based records to localStorage:", error);
-            }
-            return fileRecords;
-        }
-
-        await saveBurialRecordsToDB(defaultBurialRecords);
-        try {
-            localStorage.setItem(BURIAL_DB_KEY, JSON.stringify(defaultBurialRecords));
-        } catch (error) {
-            console.warn("Unable to save default burial records to localStorage:", error);
         }
     } catch (error) {
         console.warn("Unable to load burial records:", error);
     }
 
-    return defaultBurialRecords;
+    return [];
 }
 
 async function saveBurialRecords() {
-    try {
-        localStorage.setItem(BURIAL_DB_KEY, JSON.stringify(burialRecords));
-    } catch (error) {
-        console.warn("Unable to save burial records to localStorage:", error);
-    }
-
-    await saveBurialRecordsToDB(burialRecords);
     await saveBurialRecordsToSupabase(burialRecords);
 }
 
-const RECENT_SEARCHES_KEY = "recentBurialSearches";
-const GRAVE_CONDITION_NOTIFICATIONS_KEY = "graveConditionNotifications";
-const CURRENT_USER_KEY = "stjamesCurrentUser";
-const RECENT_BURIAL_ACTIVITY_KEY = "recentBurialActivityLog";
 const MAX_RECENT_ITEMS = 5;
-const RESERVATION_APPLICATIONS_KEY = "stjamesReservationApplications";
 let reservationApplications = [];
 let cemeteryMap = null;
 let currentMarker = null;
@@ -295,17 +91,11 @@ let activeRecordMode = "add";
 const PLARIDEL_CEMETERY_COORDINATES = [14.8830, 120.8614];
 
 function getReservationApplications() {
-    try {
-        const saved = JSON.parse(localStorage.getItem(RESERVATION_APPLICATIONS_KEY) || "[]");
-        return Array.isArray(saved) ? saved : [];
-    } catch (error) {
-        console.warn("Unable to load reservation applications:", error);
-        return [];
-    }
+    return [];
 }
 
 function saveReservationApplicationsToStorage() {
-    localStorage.setItem(RESERVATION_APPLICATIONS_KEY, JSON.stringify(reservationApplications));
+    return;
 }
 
 async function loadReservationApplications() {
@@ -329,7 +119,6 @@ async function loadReservationApplications() {
                 status: application.status,
                 createdAt: application.created_at
             }));
-            saveReservationApplicationsToStorage();
             return;
         }
 
@@ -343,7 +132,6 @@ async function loadReservationApplications() {
 
 async function saveReservationApplication(application) {
     reservationApplications = [application, ...reservationApplications.filter((item) => item.recordId !== application.recordId)];
-    saveReservationApplicationsToStorage();
 
     if (!supabaseClient) {
         return true;
@@ -380,7 +168,6 @@ function getReservationApplication(recordId) {
 async function updateReservationApplicationStatus(application, status) {
     application.status = status;
     reservationApplications = reservationApplications.map((item) => item.id === application.id ? application : item);
-    saveReservationApplicationsToStorage();
 
     if (supabaseClient) {
         const { error } = await supabaseClient
@@ -394,40 +181,19 @@ async function updateReservationApplicationStatus(application, status) {
 }
 
 function getRecentSearches() {
-    try {
-        const searches = JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY) || "[]");
-        return Array.isArray(searches) ? searches.slice(0, MAX_RECENT_ITEMS) : [];
-    } catch (error) {
-        return [];
-    }
+    return [];
 }
 
 function saveRecentSearches(searches) {
-    try {
-        const limitedSearches = Array.isArray(searches) ? searches.slice(0, MAX_RECENT_ITEMS) : [];
-        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(limitedSearches));
-    } catch (error) {
-        console.warn("Unable to save recent searches:", error);
-    }
+    return;
 }
 
 function getGraveConditionNotifications() {
-    try {
-        const notifications = JSON.parse(localStorage.getItem(GRAVE_CONDITION_NOTIFICATIONS_KEY) || "[]");
-        return Array.isArray(notifications) ? notifications.slice(0, MAX_RECENT_ITEMS) : [];
-    } catch (error) {
-        console.warn("Unable to load grave condition notifications:", error);
-        return [];
-    }
+    return [];
 }
 
 function saveGraveConditionNotifications(notifications) {
-    try {
-        const limitedNotifications = Array.isArray(notifications) ? notifications.slice(0, MAX_RECENT_ITEMS) : [];
-        localStorage.setItem(GRAVE_CONDITION_NOTIFICATIONS_KEY, JSON.stringify(limitedNotifications));
-    } catch (error) {
-        console.warn("Unable to save grave condition notifications:", error);
-    }
+    return;
 }
 
 async function getGraveConditionNotificationsFromSupabase() {
@@ -482,7 +248,6 @@ async function saveGraveConditionNotificationToSupabase(notification) {
 }
 
 async function addGraveConditionNotification(record, oldCondition, newCondition) {
-    const notifications = getGraveConditionNotifications();
     const notification = {
         id: `${record.id}-${Date.now()}`,
         name: record.name,
@@ -493,17 +258,106 @@ async function addGraveConditionNotification(record, oldCondition, newCondition)
         timestamp: Date.now(),
     };
 
-    const updatedNotifications = [notification, ...notifications].slice(0, MAX_RECENT_ITEMS);
-    saveGraveConditionNotifications(updatedNotifications);
     await saveGraveConditionNotificationToSupabase(notification);
 }
 
 function getCurrentUser() {
     try {
-        return JSON.parse(sessionStorage.getItem(CURRENT_USER_KEY) || "null");
+        const params = new URLSearchParams(window.location.search);
+        const username = params.get("user");
+        if (!username) {
+            return null;
+        }
+
+        return {
+            username: decodeURIComponent(username)
+        };
     } catch (error) {
         return null;
     }
+}
+
+async function getCurrentUserProfile() {
+    const currentUser = getCurrentUser();
+    if (!currentUser?.username) {
+        return null;
+    }
+
+    if (!supabaseClient) {
+        return currentUser;
+    }
+
+    const { data, error } = await supabaseClient
+        .from("user_accounts")
+        .select("*")
+        .ilike("username", currentUser.username)
+        .maybeSingle();
+
+    if (error) {
+        console.warn("Unable to load current user from Supabase:", error.message);
+        return currentUser;
+    }
+
+    if (!data) {
+        return currentUser;
+    }
+
+    return {
+        ...currentUser,
+        ...data,
+        fullName: data.name || data.full_name || currentUser.username,
+        name: data.name || data.full_name || currentUser.username,
+        grave: data.grave || null,
+        role: data.role || currentUser.role
+    };
+}
+
+async function getUserAccountByUsername(username) {
+    if (!username || !supabaseClient) {
+        return null;
+    }
+
+    const { data, error } = await supabaseClient
+        .from("user_accounts")
+        .select("*")
+        .ilike("username", username)
+        .maybeSingle();
+
+    if (error) {
+        console.warn("Unable to load user account from Supabase:", error.message);
+        return null;
+    }
+
+    return data;
+}
+
+async function verifyProtectedPageAccess() {
+    const pageName = window.location.pathname.split("/").pop()?.toLowerCase();
+    const isProtectedPage = pageName === "admin.html" || pageName === "user.html";
+
+    if (!isProtectedPage) {
+        return true;
+    }
+
+    const username = new URLSearchParams(window.location.search).get("user");
+    if (!username) {
+        window.location.replace("index.html");
+        return false;
+    }
+
+    const account = await getUserAccountByUsername(username);
+    if (!account) {
+        window.location.replace("index.html");
+        return false;
+    }
+
+    const expectedRole = pageName === "admin.html" ? "admin" : "visitor";
+    if (account.role !== expectedRole) {
+        window.location.replace("index.html");
+        return false;
+    }
+
+    return true;
 }
 
 function notificationBelongsToCurrentUser(notification) {
@@ -595,8 +449,8 @@ function updateBurialDetails(record) {
     }
 }
 
-function renderProfileSidebar(record) {
-    const currentUser = getCurrentUser() || {};
+async function renderProfileSidebar(record) {
+    const currentUser = await getCurrentUserProfile() || getCurrentUser() || {};
     const setValue = (id, value) => {
         const element = document.getElementById(id);
         if (element) {
@@ -604,23 +458,24 @@ function renderProfileSidebar(record) {
         }
     };
 
-    const userName = currentUser.name || currentUser.username || "Visitor";
+    const userName = currentUser.fullName || currentUser.name || currentUser.username || "Visitor";
     const access = currentUser.role === "visitor" ? "Guest Access" : currentUser.role || "Guest Access";
+    const assignedRecord = record || (currentUser.grave ? burialRecords.find((item) => item.block === currentUser.grave.block && item.plot === currentUser.grave.plot) : null);
 
     setValue("profileHeaderName", userName);
     setValue("profileUserName", userName);
     setValue("profileUserUsername", currentUser.username || "-");
     setValue("profileUserRole", access);
     setValue("profileUserAccess", access);
-    setValue("profileDeceasedName", record?.name || "No assigned record");
-    setValue("profileDeceasedDate", record?.date || "-");
-    setValue("profileDeceasedStatus", record?.status || "-");
-    setValue("profilePlotBlock", record?.block || currentUser.grave?.block || "-");
-    setValue("profilePlotNumber", record?.plot || currentUser.grave?.plot || "-");
-    setValue("profilePlotCondition", record?.cleanliness || "-");
+    setValue("profileDeceasedName", assignedRecord?.name || "No assigned record");
+    setValue("profileDeceasedDate", assignedRecord?.date || "-");
+    setValue("profileDeceasedStatus", assignedRecord?.status || "-");
+    setValue("profilePlotBlock", assignedRecord?.block || currentUser.grave?.block || "-");
+    setValue("profilePlotNumber", assignedRecord?.plot || currentUser.grave?.plot || "-");
+    setValue("profilePlotCondition", assignedRecord?.cleanliness || "-");
 }
 
-function initializeProfileSidebar() {
+async function initializeProfileSidebar() {
     const profileButton = document.getElementById("profileButton");
     const profileSidebar = document.getElementById("profileSidebar");
     const profileBackdrop = document.getElementById("profileBackdrop");
@@ -630,12 +485,12 @@ function initializeProfileSidebar() {
         return;
     }
 
-    const currentUser = getCurrentUser() || {};
+    const currentUser = await getCurrentUserProfile() || getCurrentUser() || {};
     const assignedRecord = currentUser.grave
         ? burialRecords.find((item) => item.block === currentUser.grave.block && item.plot === currentUser.grave.plot)
         : null;
 
-    renderProfileSidebar(assignedRecord);
+    await renderProfileSidebar(assignedRecord);
 
     const setOpenState = (isOpen) => {
         profileSidebar.classList.toggle("is-open", isOpen);
@@ -1308,20 +1163,11 @@ function formatRelativeActivityTime(timestamp) {
 }
 
 function getRecentBurialActivity() {
-    try {
-        return JSON.parse(localStorage.getItem(RECENT_BURIAL_ACTIVITY_KEY) || "[]");
-    } catch (error) {
-        console.warn("Unable to load recent burial activity:", error);
-        return [];
-    }
+    return [];
 }
 
 function saveRecentBurialActivity(activityItems) {
-    try {
-        localStorage.setItem(RECENT_BURIAL_ACTIVITY_KEY, JSON.stringify(activityItems));
-    } catch (error) {
-        console.warn("Unable to save recent burial activity:", error);
-    }
+    return;
 }
 
 function addRecentBurialActivity(activity) {
@@ -1526,20 +1372,6 @@ function renderAdminReservations() {
     `).join("");
 
     updateAdminReservationStats();
-}
-
-async function changeReservationStatus(recordId, newStatus) {
-    const record = burialRecords.find((item) => item.id === recordId);
-    if (!record) {
-        return;
-    }
-
-    record.status = newStatus;
-    await saveBurialRecords();
-    renderMapMarkers();
-    renderUserReservations();
-    renderAdminReservations();
-    updateDashboardStats();
 }
 
 function openReservationApplicationModal(recordId) {
@@ -2210,6 +2042,11 @@ function initializeAdminDashboard() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+    const hasAccess = await verifyProtectedPageAccess();
+    if (!hasAccess) {
+        return;
+    }
+
     burialRecords = await loadBurialRecords();
     await loadReservationApplications();
     updateDashboardStats();

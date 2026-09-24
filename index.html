@@ -257,8 +257,7 @@ const password=document.getElementById("password").value;
 const account=await authenticateUser(username,password,"admin");
 if(account){
 
-sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({ name: account.name, username: account.username, role: account.role }));
-window.location.href="admin.html";
+window.location.href=`admin.html?user=${encodeURIComponent(account.username)}`;
 
 }else{
 
@@ -290,13 +289,7 @@ const password=document.getElementById("password").value;
 const account = await authenticateUser(username, password, "visitor");
 if(account){
 
-sessionStorage.setItem("stjamesCurrentUser", JSON.stringify({
-name: account.name,
-username: account.username,
-role: account.role,
-grave: account.grave || null
-}));
-window.location.href="user.html";
+window.location.href=`user.html?user=${encodeURIComponent(account.username)}`;
 
 }else{
 
