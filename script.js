@@ -74,7 +74,6 @@ async function saveBurialRecords() {
     await saveBurialRecordsToSupabase(burialRecords);
 }
 
-const CURRENT_USER_KEY = "stjamesCurrentUser";
 const MAX_RECENT_ITEMS = 5;
 let reservationApplications = [];
 let cemeteryMap = null;
@@ -92,6 +91,70 @@ let adminMarkersLayer = null;
 let cemeteryLocationMarker = null;
 let activeRecordMode = "add";
 const PLARIDEL_CEMETERY_COORDINATES = [14.8830, 120.8614];
+
+const AUTH_REQUIRED_PAGES = {
+    "admin.html": "admin",
+    "user.html": "visitor",
+    "usercreation.html": "admin",
+    "burialrecords.html": "admin",
+    "reservationsadmin.html": "admin",
+    "reservationuser.html": "visitor"
+};
+
+function getUserFromQueryString() {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const username = params.get("user");
+        if (!username) {
+            return null;
+        }
+
+        return decodeURIComponent(username).trim();
+    } catch (error) {
+        return null;
+    }
+}
+
+async function ensureAuthorizedPageAccess() {
+    const currentPage = window.location.pathname.split("/").pop().toLowerCase();
+    const expectedRole = AUTH_REQUIRED_PAGES[currentPage];
+
+    if (!expectedRole) {
+        return true;
+    }
+
+    const username = getUserFromQueryString();
+    if (!username) {
+        window.location.href = "index.html";
+        return false;
+    }
+
+    if (!supabaseClient) {
+        window.location.href = "index.html";
+        return false;
+    }
+
+    const { data, error } = await supabaseClient
+        .from("user_accounts")
+        .select("username, role")
+        .ilike("username", username)
+        .maybeSingle();
+
+    if (error || !data || data.role !== expectedRole) {
+        window.location.href = "index.html";
+        return false;
+    }
+
+    return true;
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", async () => {
+        await ensureAuthorizedPageAccess();
+    });
+} else {
+    ensureAuthorizedPageAccess();
+}
 
 function getReservationApplications() {
     return reservationApplications;
@@ -252,16 +315,62 @@ async function addGraveConditionNotification(record, oldCondition, newCondition)
 
 function getCurrentUser() {
     try {
-        return JSON.parse(sessionStorage.getItem(CURRENT_USER_KEY) || "null");
+        const params = new URLSearchParams(window.location.search);
+        const username = params.get("user");
+        if (!username) {
+            return null;
+        }
+
+        return {
+            username: decodeURIComponent(username)
+        };
     } catch (error) {
         return null;
     }
 }
 
-function notificationBelongsToCurrentUser(notification) {
+async function getCurrentUserProfile() {
     const currentUser = getCurrentUser();
-    if (!currentUser || currentUser.role !== "visitor" || !currentUser.grave) {
+    if (!currentUser?.username) {
+        return null;
+    }
+
+    if (!supabaseClient) {
+        return currentUser;
+    }
+
+    const { data, error } = await supabaseClient
+        .from("user_accounts")
+        .select("*")
+        .ilike("username", currentUser.username)
+        .maybeSingle();
+
+    if (error) {
+        console.warn("Unable to load current user from Supabase:", error.message);
+        return currentUser;
+    }
+
+    if (!data) {
+        return currentUser;
+    }
+
+    return {
+        ...currentUser,
+        ...data,
+        fullName: data.name || data.full_name || currentUser.username,
+        name: data.name || data.full_name || currentUser.username,
+        grave: data.grave || null,
+        role: data.role || currentUser.role
+    };
+}
+
+function notificationBelongsToCurrentUser(notification, currentUser = getCurrentUser()) {
+    if (!currentUser || currentUser.role !== "visitor") {
         return currentUser?.role !== "visitor";
+    }
+
+    if (!currentUser.grave || !currentUser.grave.block || !currentUser.grave.plot) {
+        return false;
     }
 
     return notification.block === currentUser.grave.block
@@ -275,9 +384,10 @@ async function renderConditionNotifications() {
         return;
     }
 
+    const currentUser = await getCurrentUserProfile();
     const supabaseNotifications = await getGraveConditionNotificationsFromSupabase();
     const notifications = (supabaseNotifications || [])
-        .filter(notificationBelongsToCurrentUser)
+        .filter((item) => notificationBelongsToCurrentUser(item, currentUser))
         .slice(0, MAX_RECENT_ITEMS);
     const count = notifications.length;
 
@@ -347,8 +457,31 @@ function updateBurialDetails(record) {
     }
 }
 
-function renderProfileSidebar(record) {
-    const currentUser = getCurrentUser() || {};
+async function getCurrentUserAssignedRecord() {
+    const currentUser = await getCurrentUserProfile();
+    const userName = (currentUser?.fullName || currentUser?.name || currentUser?.username || "").trim();
+
+    if (currentUser?.grave && currentUser.grave.block && currentUser.grave.plot) {
+        const graveMatch = burialRecords.find((item) => {
+            return item.block === currentUser.grave.block && item.plot === currentUser.grave.plot;
+        });
+
+        if (graveMatch) {
+            return graveMatch;
+        }
+    }
+
+    if (userName) {
+        return burialRecords.find((item) => {
+            return (item.name || "").toLowerCase() === userName.toLowerCase();
+        }) || null;
+    }
+
+    return null;
+}
+
+async function renderProfileSidebar(record) {
+    const currentUser = await getCurrentUserProfile() || getCurrentUser() || {};
     const setValue = (id, value) => {
         const element = document.getElementById(id);
         if (element) {
@@ -356,23 +489,24 @@ function renderProfileSidebar(record) {
         }
     };
 
-    const userName = currentUser.name || currentUser.username || "Visitor";
+    const userName = currentUser.fullName || currentUser.name || currentUser.username || "Visitor";
     const access = currentUser.role === "visitor" ? "Guest Access" : currentUser.role || "Guest Access";
+    const assignedRecord = record || (await getCurrentUserAssignedRecord());
 
     setValue("profileHeaderName", userName);
     setValue("profileUserName", userName);
     setValue("profileUserUsername", currentUser.username || "-");
     setValue("profileUserRole", access);
     setValue("profileUserAccess", access);
-    setValue("profileDeceasedName", record?.name || "No assigned record");
-    setValue("profileDeceasedDate", record?.date || "-");
-    setValue("profileDeceasedStatus", record?.status || "-");
-    setValue("profilePlotBlock", record?.block || currentUser.grave?.block || "-");
-    setValue("profilePlotNumber", record?.plot || currentUser.grave?.plot || "-");
-    setValue("profilePlotCondition", record?.cleanliness || "-");
+    setValue("profileDeceasedName", assignedRecord?.name || "No assigned record");
+    setValue("profileDeceasedDate", assignedRecord?.date || "-");
+    setValue("profileDeceasedStatus", assignedRecord?.status || "-");
+    setValue("profilePlotBlock", assignedRecord?.block || currentUser.grave?.block || "-");
+    setValue("profilePlotNumber", assignedRecord?.plot || currentUser.grave?.plot || "-");
+    setValue("profilePlotCondition", assignedRecord?.cleanliness || "-");
 }
 
-function initializeProfileSidebar() {
+async function initializeProfileSidebar() {
     const profileButton = document.getElementById("profileButton");
     const profileSidebar = document.getElementById("profileSidebar");
     const profileBackdrop = document.getElementById("profileBackdrop");
@@ -382,12 +516,9 @@ function initializeProfileSidebar() {
         return;
     }
 
-    const currentUser = getCurrentUser() || {};
-    const assignedRecord = currentUser.grave
-        ? burialRecords.find((item) => item.block === currentUser.grave.block && item.plot === currentUser.grave.plot)
-        : null;
+    const assignedRecord = await getCurrentUserAssignedRecord();
 
-    renderProfileSidebar(assignedRecord);
+    await renderProfileSidebar(assignedRecord);
 
     const setOpenState = (isOpen) => {
         profileSidebar.classList.toggle("is-open", isOpen);
