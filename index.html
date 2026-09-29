@@ -128,16 +128,15 @@
 
                 <div class="inputBox">
 
-                    <i class="fa-solid fa-user"></i>
+                    <i class="fa-solid fa-envelope"></i>
 
                     <input
-                    type="text"
-                    id="username"
-                    placeholder="Username"
-                    autocomplete="username"
+                    type="email"
+                    id="email"
+                    placeholder="Email address"
+                    autocomplete="email"
                     required
                     >
-                    
 
                 </div>
 
@@ -172,13 +171,8 @@
 </div>
 <!-- SUPABASE -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="auth.js"></script>
 <script>
-/* =========================================
-       SUPABASE CONFIGURATION
-========================================= */
-    const supabaseUrl="https://ouzfgihgrlssdsqupxit.supabase.co";
-    const supabaseKey="sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm";
-    const supabaseClient=window.supabase.createClient(supabaseUrl,supabaseKey);
 /* =========================================
        ELEMENTS
 ========================================= */
@@ -203,37 +197,43 @@ let selectedRole = null;
 loginPage.style.display="none";
 
 /* =========================================
-       AUTHENTICATE USER USING SUPABASE
+       AUTHENTICATE USING SUPABASE AUTH
+   Returns { profile } on success, or { error: "message" } on failure.
 ========================================= */
+async function authenticateUser(email,password,role){
 
-async function authenticateUser(
-    username,
-    password,
-    role
-){
+if(!email||!password){
+return { error: "Please enter your email and password." };
+}
 
-const normalizedUsername=
-    (username||"")
-        .trim()
-        .toLowerCase();
+const { data, error } = await supabaseClient.auth.signInWithPassword({
+email: email.trim(),
+password
+});
 
-const {data,error}=await supabaseClient
-.from("user_accounts")
-.select("*")
-.ilike("username",normalizedUsername)
-.eq("password",password)
-.eq("role",role)
+if(error||!data.session){
+console.warn("Sign in failed:", error ? error.message : "no session returned");
+return { error: "Invalid email or password." };
+}
+
+const { data: profile, error: profileError } = await supabaseClient
+.from("profiles")
+.select("username, role")
+.eq("id", data.user.id)
 .maybeSingle();
 
-if(!error&&data){
-return data;
+if(profileError||!profile){
+console.warn("Unable to load profile:", profileError ? profileError.message : "profile missing");
+await supabaseClient.auth.signOut();
+return { error: "This account has no profile yet. Please contact the administrator." };
 }
 
-if(error){
-console.warn("Unable to authenticate with Supabase:",error.message);
+if(role&&profile.role!==role){
+await supabaseClient.auth.signOut();
+return { error: "This account is registered as a " + profile.role + ", not an " + role + "." };
 }
 
-return null;
+return { profile };
 
 }
 
@@ -251,19 +251,17 @@ loginButton.onclick=async function(e){
 
 e.preventDefault();
 
-const username=document.getElementById("username").value;
+const email=document.getElementById("email").value;
 const password=document.getElementById("password").value;
 
-const account=await authenticateUser(username,password,"admin");
-if(account){
+const result=await authenticateUser(email,password,"admin");
 
-window.location.href=`admin.html?user=${encodeURIComponent(account.username)}`;
-
-}else{
-
-alert("Invalid Administrator Username or Password.");
-
+if(result.error){
+alert(result.error);
+return;
 }
+
+window.location.href="admin.html";
 
 }
 
@@ -283,19 +281,17 @@ loginButton.onclick=async function(e){
 
 e.preventDefault();
 
-const username=document.getElementById("username").value;
+const email=document.getElementById("email").value;
 const password=document.getElementById("password").value;
 
-const account = await authenticateUser(username, password, "visitor");
-if(account){
+const result=await authenticateUser(email,password,"visitor");
 
-window.location.href=`user.html?user=${encodeURIComponent(account.username)}`;
-
-}else{
-
-alert("Invalid Visitor Username or Password.");
-
+if(result.error){
+alert(result.error);
+return;
 }
+
+window.location.href="user.html";
 
 }
 

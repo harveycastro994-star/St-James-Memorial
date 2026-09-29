@@ -131,6 +131,7 @@ CARD
 
 }
 
+
 .card h2{
     text-align:center;
     margin-bottom:8px;
@@ -1742,14 +1743,17 @@ textarea {
     min-width:0;
 }
 
+/* The records / reservations tables are wider than a phone screen.
+   These two rules used to be overflow:hidden + display:block, which clipped
+   the table so the Action column (Edit / View / Remove) could not be reached
+   at all on a small screen. The wrapper now scrolls instead. */
 .table-section {
-    overflow:hidden;
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
 }
 
 table {
-    display:block;
     max-width:100%;
-    overflow-x:auto;
     white-space:nowrap;
 }
 

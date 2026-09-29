@@ -94,7 +94,7 @@ Reservations
 
 <li>
 
-<a href="index.html">
+<a href="index.html" onclick="signOutAndGoHome(); return false;">
 
 <i class="fa-solid fa-right-from-bracket"></i>
 
@@ -284,11 +284,11 @@ BURIAL INFORMATION
             Burial Information
         </h3>
 
-        <p><strong>Deceased Name:</strong> <span id="burialName">Clance Yhvan Cruz</span></p>
-        <p><strong>Block:</strong> <span id="burialBlock">Block A</span></p>
-        <p><strong>Plot Number:</strong> <span id="burialPlot">A-024</span></p>
-        <p><strong>Date of Burial:</strong> <span id="burialDate">January 15, 2025</span></p>
-        <p><strong>Status:</strong> <span id="burialStatus">Occupied</span></p>
+        <p><strong>Deceased Name:</strong> <span id="burialName">No record selected</span></p>
+        <p><strong>Block:</strong> <span id="burialBlock">-</span></p>
+        <p><strong>Plot Number:</strong> <span id="burialPlot">-</span></p>
+        <p><strong>Date of Burial:</strong> <span id="burialDate">-</span></p>
+        <p><strong>Status:</strong> <span id="burialStatus">-</span></p>
         <p><strong>Current GPS Latitude:</strong> <span id="userLatitude">--</span></p>
         <p><strong>Current GPS Longitude:</strong> <span id="userLongitude">--</span></p>
 
@@ -485,6 +485,7 @@ GIS-Based Burial Site Mapping and Record Management System
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="auth.js"></script>
 <script src="script.js"></script>
 
 </body>

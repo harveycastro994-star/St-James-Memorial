@@ -1,12 +1,13 @@
-const supabaseUrl = "https://ouzfgihgrlssdsqupxit.supabase.co";
-const supabaseKey = "sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm";
-
-const supabaseClient = window.supabase
-    ? window.supabase.createClient(supabaseUrl, supabaseKey)
-    : null;
+/* The shared Supabase client and the session helpers live in auth.js, which
+   every page loads before this file, so the project has only one client. */
 
 let burialRecords = [];
 let editingRecordId = null;
+
+/* Set by insertBurialRecord / updateBurialRecord so the caller can show a
+   message that explains what actually went wrong (for example a duplicate
+   block + plot rejected by the unique constraint). */
+let lastRecordSaveMessage = "";
 
 async function getBurialRecordsFromSupabase() {
     if (!supabaseClient) {
@@ -26,23 +27,80 @@ async function getBurialRecordsFromSupabase() {
     return Array.isArray(data) ? data : null;
 }
 
-async function saveBurialRecordsToSupabase(records) {
+async function insertBurialRecord(record) {
     if (!supabaseClient) {
-        return;
+        return null;
+    }
+
+    const { data, error } = await supabaseClient
+        .from("burial_records")
+        .insert(record)
+        .select()
+        .single();
+
+    if (error) {
+        console.warn("Unable to insert the burial record:", error.message);
+        lastRecordSaveMessage = error.code === "23505"
+            ? "That block and plot already exist. Use a different plot number."
+            : "The record could not be saved. Check your connection and try again.";
+        return null;
+    }
+
+    return data;
+}
+
+async function updateBurialRecord(record) {
+    if (!supabaseClient || !record?.id) {
+        return null;
+    }
+
+    const { id, ...changes } = record;
+
+    const { data, error } = await supabaseClient
+        .from("burial_records")
+        .update(changes)
+        .eq("id", id)
+        .select()
+        .single();
+
+    if (error) {
+        console.warn("Unable to update the burial record:", error.message);
+        lastRecordSaveMessage = error.code === "23505"
+            ? "That block and plot already exist. Use a different plot number."
+            : "The record could not be saved. Check your connection and try again.";
+        return null;
+    }
+
+    return data;
+}
+
+async function deleteReservationApplicationForRecord(recordId) {
+    if (!supabaseClient || !recordId) {
+        return true;
     }
 
     const { error } = await supabaseClient
-        .from("burial_records")
-        .upsert(records, { onConflict: "id" });
+        .from("reservation_applications")
+        .delete()
+        .eq("record_id", recordId);
 
     if (error) {
-        console.warn("Unable to save burial records to Supabase:", error.message);
+        console.warn("Unable to delete the reservation application:", error.message);
+        return false;
     }
+
+    reservationApplications = reservationApplications.filter((item) => item.recordId !== recordId);
+    return true;
 }
 
 async function deleteBurialRecordFromSupabase(recordId) {
     if (!supabaseClient) {
-        return;
+        return false;
+    }
+
+    // the application is not linked by a foreign key, so remove it explicitly
+    if (!await deleteReservationApplicationForRecord(recordId)) {
+        return false;
     }
 
     const { error } = await supabaseClient
@@ -52,7 +110,10 @@ async function deleteBurialRecordFromSupabase(recordId) {
 
     if (error) {
         console.warn("Unable to delete burial record from Supabase:", error.message);
+        return false;
     }
+
+    return true;
 }
 
 async function loadBurialRecords() {
@@ -68,10 +129,6 @@ async function loadBurialRecords() {
     return [];
 }
 
-async function saveBurialRecords() {
-    await saveBurialRecordsToSupabase(burialRecords);
-}
-
 const MAX_RECENT_ITEMS = 5;
 let reservationApplications = [];
 let cemeteryMap = null;
@@ -84,6 +141,9 @@ let adminNavigationRouteLayer = null;
 let adminMap = null;
 let adminMarker = null;
 let adminGpsMarker = null;
+let gpsWatchId = null;
+let adminGpsAccuracyCircle = null;
+let adminGpsHasCentered = false;
 let cemeteryMarkersLayer = null;
 let adminMarkersLayer = null;
 let cemeteryLocationMarker = null;
@@ -109,6 +169,7 @@ async function loadReservationApplications() {
             reservationApplications = data.map((application) => ({
                 id: application.id,
                 recordId: application.record_id,
+                applicantUserId: application.applicant_user_id,
                 applicantFullName: application.applicant_full_name,
                 applicantEmail: application.applicant_email,
                 applicantContactNumber: application.applicant_contact_number,
@@ -131,17 +192,18 @@ async function loadReservationApplications() {
 }
 
 async function saveReservationApplication(application) {
-    reservationApplications = [application, ...reservationApplications.filter((item) => item.recordId !== application.recordId)];
-
     if (!supabaseClient) {
         return true;
     }
 
+    // One application per plot: record_id has a UNIQUE constraint, so the
+    // database itself rejects a second application for the same plot.
     const { error } = await supabaseClient
         .from("reservation_applications")
-        .upsert({
+        .insert({
             id: application.id,
             record_id: application.recordId,
+            applicant_user_id: application.applicantUserId,
             applicant_full_name: application.applicantFullName,
             applicant_email: application.applicantEmail,
             applicant_contact_number: application.applicantContactNumber,
@@ -151,18 +213,31 @@ async function saveReservationApplication(application) {
             preferred_burial_date: application.preferredBurialDate,
             status: application.status,
             created_at: application.createdAt
-        }, { onConflict: "id" });
+        });
 
     if (error) {
-        console.warn("Unable to save reservation application to Supabase:", error.message);
+        if (error.code === "23505") {
+            alert("This plot already has a reservation application.");
+        } else {
+            alert("Your application could not be submitted. Please try again.");
+        }
+        console.warn("Unable to save the reservation application:", error.message);
         return false;
     }
 
+    reservationApplications = [application, ...reservationApplications.filter((item) => item.recordId !== application.recordId)];
     return true;
 }
 
 function getReservationApplication(recordId) {
     return reservationApplications.find((application) => application.recordId === recordId);
+}
+
+/* The application that still blocks a plot: Pending or Accepted. A Rejected
+   application is history, not a reservation. */
+function getOpenApplication(recordId) {
+    const application = getReservationApplication(recordId);
+    return application && application.status !== "Rejected" ? application : null;
 }
 
 async function updateReservationApplicationStatus(application, status) {
@@ -180,12 +255,26 @@ async function updateReservationApplicationStatus(application, status) {
     }
 }
 
+/* Recent searches are a per-browser convenience, so the browser is the right
+   place to keep them. These two functions used to return immediately, which is
+   why the "Recent searches" panel always said "No recent searches yet" even
+   after a successful search. */
 function getRecentSearches() {
-    return [];
+    try {
+        const stored = JSON.parse(localStorage.getItem("recentSearches") || "[]");
+        return Array.isArray(stored) ? stored : [];
+    } catch (error) {
+        console.warn("Unable to read recent searches:", error);
+        return [];
+    }
 }
 
 function saveRecentSearches(searches) {
-    return;
+    try {
+        localStorage.setItem("recentSearches", JSON.stringify(searches.slice(0, MAX_RECENT_ITEMS)));
+    } catch (error) {
+        console.warn("Unable to store recent searches:", error);
+    }
 }
 
 function getGraveConditionNotifications() {
@@ -249,7 +338,8 @@ async function saveGraveConditionNotificationToSupabase(notification) {
 
 async function addGraveConditionNotification(record, oldCondition, newCondition) {
     const notification = {
-        id: `${record.id}-${Date.now()}`,
+        id: crypto.randomUUID(),
+        recordId: record.id,
         name: record.name,
         block: record.block,
         plot: record.plot,
@@ -261,113 +351,62 @@ async function addGraveConditionNotification(record, oldCondition, newCondition)
     await saveGraveConditionNotificationToSupabase(notification);
 }
 
-function getCurrentUser() {
-    try {
-        const params = new URLSearchParams(window.location.search);
-        const username = params.get("user");
-        if (!username) {
-            return null;
-        }
+/* The signed-in profile ("currentProfile") is loaded once by auth.js. This
+   helper keeps the shape the rest of this file already expects. */
+function getCurrentUserProfile() {
+    const profile = getCachedProfile();
 
-        return {
-            username: decodeURIComponent(username)
-        };
-    } catch (error) {
-        return null;
-    }
-}
-
-async function getCurrentUserProfile() {
-    const currentUser = getCurrentUser();
-    if (!currentUser?.username) {
+    if (!profile) {
         return null;
     }
 
-    if (!supabaseClient) {
-        return currentUser;
-    }
-
-    const { data, error } = await supabaseClient
-        .from("user_accounts")
-        .select("*")
-        .ilike("username", currentUser.username)
-        .maybeSingle();
-
-    if (error) {
-        console.warn("Unable to load current user from Supabase:", error.message);
-        return currentUser;
-    }
-
-    if (!data) {
-        return currentUser;
-    }
+    const record = profile.assigned_record || null;
 
     return {
-        ...currentUser,
-        ...data,
-        fullName: data.name || data.full_name || currentUser.username,
-        name: data.name || data.full_name || currentUser.username,
-        grave: data.grave || null,
-        role: data.role || currentUser.role
+        id: profile.id,
+        role: profile.role,
+        username: profile.username,
+        fullName: profile.full_name,
+        name: profile.full_name,
+        grave: record ? { block: record.block, plot: record.plot } : null,
+        assignedRecord: record
     };
 }
 
-async function getUserAccountByUsername(username) {
-    if (!username || !supabaseClient) {
-        return null;
+/* A visitor sees only updates for their own plot; an administrator sees all. */
+function notificationBelongsToCurrentUser(notification) {
+    const currentUser = getCurrentUserProfile();
+
+    if (!currentUser) {
+        return false;
     }
 
-    const { data, error } = await supabaseClient
-        .from("user_accounts")
-        .select("*")
-        .ilike("username", username)
-        .maybeSingle();
-
-    if (error) {
-        console.warn("Unable to load user account from Supabase:", error.message);
-        return null;
-    }
-
-    return data;
-}
-
-async function verifyProtectedPageAccess() {
-    const pageName = window.location.pathname.split("/").pop()?.toLowerCase();
-    const isProtectedPage = pageName === "admin.html" || pageName === "user.html";
-
-    if (!isProtectedPage) {
+    // administrators have no assigned plot, so they may see everything
+    if (currentUser.role !== "visitor") {
         return true;
     }
 
-    const username = new URLSearchParams(window.location.search).get("user");
-    if (!username) {
-        window.location.replace("index.html");
+    const record = currentUser.assignedRecord;
+    if (!record) {
         return false;
     }
 
-    const account = await getUserAccountByUsername(username);
-    if (!account) {
-        window.location.replace("index.html");
-        return false;
+    if (notification.recordId) {
+        return notification.recordId === record.id;
     }
 
-    const expectedRole = pageName === "admin.html" ? "admin" : "visitor";
-    if (account.role !== expectedRole) {
-        window.location.replace("index.html");
-        return false;
-    }
-
-    return true;
+    // notifications created before record_id existed fall back to block + plot
+    return notification.block === record.block && notification.plot === record.plot;
 }
 
-function notificationBelongsToCurrentUser(notification) {
-    const currentUser = getCurrentUser();
-    if (!currentUser || currentUser.role !== "visitor" || !currentUser.grave) {
-        return currentUser?.role !== "visitor";
-    }
+/* Which role a page requires, decided from the whole path.
+   Matching the file name only broke on hosts that serve clean URLs such as
+   /admin or /admin/ instead of /admin.html, where no guard would apply. */
+function expectedRoleForPage() {
+    const path = window.location.pathname.toLowerCase();
+    const adminPages = /\/(admin|burialrecords|usercreation|reservationsadmin)(\.html)?\/?$/;
 
-    return notification.block === currentUser.grave.block
-        && notification.plot === currentUser.grave.plot;
+    return adminPages.test(path) ? "admin" : "visitor";
 }
 
 async function renderConditionNotifications() {
@@ -441,7 +480,7 @@ function updateBurialDetails(record) {
     nameElement.textContent = record.name;
     blockElement.textContent = record.block;
     plotElement.textContent = record.plot;
-    dateElement.textContent = record.date;
+    dateElement.textContent = displayDate(record.date);
     statusElement.textContent = record.status;
 
     if (record.lat !== undefined && record.lng !== undefined) {
@@ -450,7 +489,7 @@ function updateBurialDetails(record) {
 }
 
 async function renderProfileSidebar(record) {
-    const currentUser = await getCurrentUserProfile() || getCurrentUser() || {};
+    const currentUser = getCurrentUserProfile() || {};
     const setValue = (id, value) => {
         const element = document.getElementById(id);
         if (element) {
@@ -458,9 +497,11 @@ async function renderProfileSidebar(record) {
         }
     };
 
-    const userName = currentUser.fullName || currentUser.name || currentUser.username || "Visitor";
+    const userName = currentUser.fullName || currentUser.username || "Visitor";
     const access = currentUser.role === "visitor" ? "Guest Access" : currentUser.role || "Guest Access";
-    const assignedRecord = record || (currentUser.grave ? burialRecords.find((item) => item.block === currentUser.grave.block && item.plot === currentUser.grave.plot) : null);
+    // the assigned plot comes straight from profiles.assigned_record_id,
+    // so it no longer depends on matching block + plot text in the browser
+    const assignedRecord = record || currentUser.assignedRecord || null;
 
     setValue("profileHeaderName", userName);
     setValue("profileUserName", userName);
@@ -468,10 +509,10 @@ async function renderProfileSidebar(record) {
     setValue("profileUserRole", access);
     setValue("profileUserAccess", access);
     setValue("profileDeceasedName", assignedRecord?.name || "No assigned record");
-    setValue("profileDeceasedDate", assignedRecord?.date || "-");
+    setValue("profileDeceasedDate", displayDate(assignedRecord?.date));
     setValue("profileDeceasedStatus", assignedRecord?.status || "-");
-    setValue("profilePlotBlock", assignedRecord?.block || currentUser.grave?.block || "-");
-    setValue("profilePlotNumber", assignedRecord?.plot || currentUser.grave?.plot || "-");
+    setValue("profilePlotBlock", assignedRecord?.block || "-");
+    setValue("profilePlotNumber", assignedRecord?.plot || "-");
     setValue("profilePlotCondition", assignedRecord?.cleanliness || "-");
 }
 
@@ -485,12 +526,9 @@ async function initializeProfileSidebar() {
         return;
     }
 
-    const currentUser = await getCurrentUserProfile() || getCurrentUser() || {};
-    const assignedRecord = currentUser.grave
-        ? burialRecords.find((item) => item.block === currentUser.grave.block && item.plot === currentUser.grave.plot)
-        : null;
+    const currentUser = getCurrentUserProfile() || {};
 
-    await renderProfileSidebar(assignedRecord);
+    await renderProfileSidebar(currentUser.assignedRecord || null);
 
     const setOpenState = (isOpen) => {
         profileSidebar.classList.toggle("is-open", isOpen);
@@ -577,6 +615,9 @@ function renderMapMarkers() {
             cemeteryMarkersLayer = L.layerGroup().addTo(cemeteryMap);
         }
         cemeteryMarkersLayer.clearLayers();
+        // the visitor map used to be cleared but never filled, so it showed no
+        // plots at all until a search was run
+        renderBurialMarkers(cemeteryMap, cemeteryMarkersLayer, burialRecords);
     }
 
     if (adminMap) {
@@ -735,35 +776,77 @@ function initializeAdminMap() {
                 return;
             }
 
-            locationButton.disabled = true;
-            locationButton.textContent = "Finding location...";
+            // Start one watcher and reuse its marker and accuracy circle for every update.
+            if (gpsWatchId !== null) {
+                return;
+            }
 
-            navigator.geolocation.getCurrentPosition(
+            locationButton.disabled = true;
+            locationButton.textContent = "Tracking location...";
+
+            gpsWatchId = navigator.geolocation.watchPosition(
                 (position) => {
                     const latitude = position.coords.latitude;
                     const longitude = position.coords.longitude;
                     const accuracy = position.coords.accuracy;
+                    const coordinates = [latitude, longitude];
 
                     if (adminGpsMarker) {
-                        adminGpsMarker.setLatLng([latitude, longitude]);
+                        adminGpsMarker.setLatLng(coordinates);
                     } else {
-                        adminGpsMarker = L.marker([latitude, longitude])
+                        adminGpsMarker = L.marker(coordinates)
                             .addTo(adminMap)
                             .bindPopup("Device GPS location");
                     }
 
-                    adminMap.setView([latitude, longitude], 20);
+                    if (adminGpsAccuracyCircle) {
+                        adminGpsAccuracyCircle.setLatLng(coordinates);
+                        adminGpsAccuracyCircle.setRadius(accuracy);
+                    } else {
+                        adminGpsAccuracyCircle = L.circle(coordinates, {
+                            radius: accuracy,
+                            color: "#2563eb",
+                            fillColor: "#60a5fa",
+                            fillOpacity: 0.2,
+                            weight: 2
+                        }).addTo(adminMap);
+                    }
+
+                    // Center only on the first successful fix; later updates must not move the map.
+                    if (!adminGpsHasCentered) {
+                        adminMap.setView(coordinates, 20);
+                        adminGpsHasCentered = true;
+                    }
+
                     const latitudeElement = document.getElementById("adminLatitude");
                     const longitudeElement = document.getElementById("adminLongitude");
                     if (latitudeElement) latitudeElement.textContent = latitude;
                     if (longitudeElement) longitudeElement.textContent = longitude;
-                    if (accuracyElement) accuracyElement.textContent = `Estimated GPS accuracy: ${Math.round(accuracy)} meters`;
+                    if (accuracyElement) accuracyElement.textContent = `Accuracy: ±${Math.round(accuracy)} meters`;
 
+                    adminGpsMarker.hasLoaded = true;
                     locationButton.disabled = false;
-                    locationButton.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use My GPS Location';
+                    locationButton.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> GPS Tracking Active';
                 },
                 (error) => {
-                    if (accuracyElement) accuracyElement.textContent = `Unable to get location: ${error.message}`;
+                    const errorMessages = {
+                        1: "Location permission was denied. Please allow location access in your browser.",
+                        2: "Your location is currently unavailable. Please check your GPS or network connection.",
+                        3: "The GPS request timed out. Please try again."
+                    };
+
+                    if (accuracyElement) accuracyElement.textContent = errorMessages[error.code] || `Unable to get location: ${error.message}`;
+
+                    /* Stop the watcher for EVERY error, not only a denied
+                       permission. Before this, gpsWatchId stayed set after a
+                       timeout or "unavailable" error, and the click handler
+                       starts with "if (gpsWatchId !== null) return", so the
+                       button did nothing on the second attempt. */
+                    if (gpsWatchId !== null) {
+                        navigator.geolocation.clearWatch(gpsWatchId);
+                        gpsWatchId = null;
+                    }
+                    adminGpsHasCentered = false;
                     locationButton.disabled = false;
                     locationButton.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use My GPS Location';
                 },
@@ -793,7 +876,7 @@ function focusAdminRecord(record) {
     if (burialNameElement) burialNameElement.textContent = record.name || "Available Plot";
     if (burialBlockElement) burialBlockElement.textContent = record.block || "-";
     if (burialPlotElement) burialPlotElement.textContent = record.plot || "-";
-    if (burialDateElement) burialDateElement.textContent = record.date || "-";
+    if (burialDateElement) burialDateElement.textContent = displayDate(record.date);
     if (burialStatusElement) burialStatusElement.textContent = record.status || "-";
 
     if (adminMarker) {
@@ -941,6 +1024,31 @@ function searchBurialRecord() {
     }
 }
 
+/* Asks the walking-route service for a route, but never waits forever: the
+   public OSRM demo server has no service guarantee, and a request that hangs
+   used to leave the "Navigate to Grave" button disabled indefinitely. */
+async function fetchWalkingRoute(routeUrl) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    try {
+        const response = await fetch(routeUrl, { signal: controller.signal });
+
+        if (!response.ok) {
+            throw new Error(`The routing service replied with status ${response.status}.`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        if (error.name === "AbortError") {
+            throw new Error("The routing service did not respond in time.");
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 function navigateToSelectedGrave() {
     const statusElement = document.getElementById("navigationStatus");
     const navigateButton = document.getElementById("navigateToGraveBtn");
@@ -978,8 +1086,7 @@ function navigateToSelectedGrave() {
 
         try {
             const routeUrl = `https://router.project-osrm.org/route/v1/foot/${startLongitude},${startLatitude};${endLongitude},${endLatitude}?overview=full&geometries=geojson&steps=true`;
-            const response = await fetch(routeUrl);
-            const routeData = await response.json();
+            const routeData = await fetchWalkingRoute(routeUrl);
             const route = routeData.routes && routeData.routes[0];
 
             if (!route) throw new Error("No walking route was found.");
@@ -1050,8 +1157,7 @@ function navigateToSelectedAdminGrave() {
 
         try {
             const routeUrl = `https://router.project-osrm.org/route/v1/foot/${startLongitude},${startLatitude};${endLongitude},${endLatitude}?overview=full&geometries=geojson&steps=true`;
-            const response = await fetch(routeUrl);
-            const routeData = await response.json();
+            const routeData = await fetchWalkingRoute(routeUrl);
             const route = routeData.routes && routeData.routes[0];
 
             if (!route) throw new Error("No walking route was found.");
@@ -1115,6 +1221,13 @@ function formatDisplayDate(value) {
     return value;
 }
 
+/* Dates are stored as YYYY-MM-DD. This renders them for the interface and
+   shows "-" when there is no date, so an empty value can never appear as
+   "January 1, 1970". */
+function displayDate(value) {
+    return value ? formatDisplayDate(value) : "-";
+}
+
 function updateDashboardStats() {
     const totalBurials = document.getElementById("statsTotalBurials");
     const occupiedPlots = document.getElementById("statsOccupiedPlots");
@@ -1162,30 +1275,11 @@ function formatRelativeActivityTime(timestamp) {
     return `${diffDays} days ago`;
 }
 
-function getRecentBurialActivity() {
-    return [];
-}
-
-function saveRecentBurialActivity(activityItems) {
-    return;
-}
-
-function addRecentBurialActivity(activity) {
-    const activities = getRecentBurialActivity();
-    const nextActivity = {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        icon: activity.icon || "fa-solid fa-clock-rotate-left",
-        title: activity.title || "Burial Record Updated",
-        description: activity.description || "Burial record was updated.",
-        timestamp: activity.timestamp || Date.now()
-    };
-
-    const updatedActivities = [nextActivity, ...activities].slice(0, 8);
-    saveRecentBurialActivity(updatedActivities);
-    renderRecentBurialActivity();
-}
-
-function renderRecentBurialActivity() {
+/* This panel used to be permanently empty: it read from getRecentBurialActivity(),
+   which returned [] and saved nothing anywhere.
+   Recent grave condition updates are the only real event log the system keeps,
+   so the panel now shows those - the same rows the notification badge counts. */
+async function renderRecentBurialActivity() {
     const activityList = document.getElementById("recentBurialActivityList");
     const notificationBadge = document.getElementById("notificationBadge");
     const notificationButton = document.getElementById("notificationButton");
@@ -1194,31 +1288,33 @@ function renderRecentBurialActivity() {
         return;
     }
 
-    const activities = getRecentBurialActivity();
+    const notifications = await getGraveConditionNotificationsFromSupabase() || [];
 
     if (notificationBadge) {
-        const count = activities.length;
+        const count = notifications.length;
         notificationBadge.textContent = count > 0 ? count : "";
         notificationBadge.style.display = count > 0 ? "inline-flex" : "none";
     }
 
     if (notificationButton) {
-        notificationButton.title = activities.length > 0 ? `${activities.length} recent updates` : "No recent updates";
+        notificationButton.title = notifications.length > 0
+            ? `${notifications.length} recent updates`
+            : "No recent updates";
     }
 
-    if (activities.length === 0) {
-        activityList.innerHTML = '<div class="activity"><p>No recent activity yet.</p></div>';
+    if (notifications.length === 0) {
+        activityList.innerHTML = '<div class="activity"><p>No recent grave updates yet.</p></div>';
         return;
     }
 
-    activityList.innerHTML = activities.map((activity) => `
+    activityList.innerHTML = notifications.map((item) => `
         <div class="activity">
-            <i class="${activity.icon}"></i>
+            <i class="fa-solid fa-broom"></i>
             <div>
-                <h4>${activity.title}</h4>
-                <p>${activity.description}</p>
+                <h4>${item.name || "Available Plot"} • ${item.block} • Plot ${item.plot}</h4>
+                <p>Grave condition changed from ${item.oldCondition} to ${item.newCondition}.</p>
             </div>
-            <span>${formatRelativeActivityTime(activity.timestamp)}</span>
+            <span>${formatRelativeActivityTime(item.timestamp)}</span>
         </div>
     `).join("");
 }
@@ -1237,7 +1333,7 @@ function renderBurialRecordsTable() {
             <td>${record.name}</td>
             <td>${record.block.replace("Block ", "")}</td>
             <td>${record.plot}</td>
-            <td>${record.date}</td>
+            <td>${displayDate(record.date)}</td>
             <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
             <td>
                 <button class="table-action-btn" data-action="edit" data-record-id="${record.id}">Edit</button>
@@ -1258,33 +1354,23 @@ function getReservationCounts() {
     };
 }
 
+/* The visitor page used to force Reserved and Occupied to "0" and hide those
+   two cards, so the tiles could never match the data. They now show the real
+   numbers, the same as the administrator page. */
 function updateUserReservationStats() {
     const counts = getReservationCounts();
     const reservedCount = document.getElementById("userReservedCount");
     const availableCount = document.getElementById("userAvailableCount");
     const occupiedCount = document.getElementById("userOccupiedCount");
-    const reservedCard = reservedCount?.closest(".stat-card");
-    const occupiedCard = occupiedCount?.closest(".stat-card");
-    const availableCard = availableCount?.closest(".stat-card");
 
     if (reservedCount) {
-        reservedCount.textContent = "0";
-    }
-    if (occupiedCount) {
-        occupiedCount.textContent = "0";
+        reservedCount.textContent = counts.reserved.toString();
     }
     if (availableCount) {
         availableCount.textContent = counts.available.toString();
     }
-
-    if (reservedCard) {
-        reservedCard.style.display = "none";
-    }
-    if (occupiedCard) {
-        occupiedCard.style.display = "none";
-    }
-    if (availableCard) {
-        availableCard.style.display = "flex";
+    if (occupiedCount) {
+        occupiedCount.textContent = counts.occupied.toString();
     }
 }
 
@@ -1319,6 +1405,10 @@ function renderUserReservations() {
         return;
     }
 
+    // A visitor only receives their own application rows (enforced by RLS).
+    // A plot with a pending or accepted application shows that status instead
+    // of the Reserve button. A REJECTED application must not hide the plot,
+    // otherwise the visitor could never apply for it again.
     const availableRecords = burialRecords.filter((record) => record.status === "Available");
 
     if (availableRecords.length === 0) {
@@ -1330,20 +1420,25 @@ function renderUserReservations() {
             </tr>
         `;
     } else {
-        tableBody.innerHTML = availableRecords.map((record) => `
+        tableBody.innerHTML = availableRecords.map((record) => {
+            const application = getOpenApplication(record.id);
+            const action = application
+                ? `<span class="status reserved">Application ${application.status}</span>`
+                : `<button class="table-action-btn" data-action="reservation" data-reservation-status="available" data-record-id="${record.id}">
+                        Reserve
+                    </button>`;
+
+            return `
             <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}">
                 <td>${record.id}</td>
                 <td>${getDisplayName(record)}</td>
                 <td>${record.block.replace("Block ", "")}</td>
                 <td>${record.plot}</td>
                 <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
-                <td>
-                    <button class="table-action-btn" data-action="reservation" data-reservation-status="available" data-record-id="${record.id}">
-                        Reserve
-                    </button>
-                </td>
+                <td>${action}</td>
             </tr>
-        `).join("");
+        `;
+        }).join("");
     }
 
     updateUserReservationStats();
@@ -1355,7 +1450,16 @@ function renderAdminReservations() {
         return;
     }
 
-    tableBody.innerHTML = burialRecords.map((record) => `
+    tableBody.innerHTML = burialRecords.map((record) => {
+        /* Show the application for every plot that has one, including a
+           rejected one. Previously the button only appeared while the plot was
+           Reserved, so a rejected application could never be reviewed again. */
+        const application = getReservationApplication(record.id);
+        const applicationButton = application
+            ? `<button class="table-action-btn" data-action="view-application" data-record-id="${record.id}">View Application (${application.status})</button>`
+            : "";
+
+        return `
         <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}">
             <td>${record.id}</td>
             <td>${getDisplayName(record)}</td>
@@ -1363,13 +1467,14 @@ function renderAdminReservations() {
             <td>${record.plot}</td>
             <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
             <td>
-                ${record.status === "Reserved" && getReservationApplication(record.id) ? `<button class="table-action-btn" data-action="view-application" data-record-id="${record.id}">View Application</button>` : ""}
+                ${applicationButton}
                 <button class="table-action-btn" data-action="toggle-reservation" data-reservation-status="${record.status.toLowerCase()}" data-record-id="${record.id}">
                     ${record.status === "Reserved" ? "Release" : record.status === "Available" ? "Reserve" : "Locked"}
                 </button>
             </td>
         </tr>
-    `).join("");
+    `;
+    }).join("");
 
     updateAdminReservationStats();
 }
@@ -1412,9 +1517,16 @@ async function submitReservationApplication(event) {
         return;
     }
 
+    const profile = getCachedProfile();
+    if (!profile) {
+        alert("Your session has ended. Please sign in again.");
+        return;
+    }
+
     const application = {
-        id: `${recordId}-${Date.now()}`,
+        id: crypto.randomUUID(),
         recordId,
+        applicantUserId: profile.id,
         applicantFullName: document.getElementById("applicationApplicantFullName").value.trim(),
         applicantEmail: document.getElementById("applicationApplicantEmail").value.trim(),
         applicantContactNumber: document.getElementById("applicationApplicantContactNumber").value.trim(),
@@ -1426,10 +1538,13 @@ async function submitReservationApplication(event) {
         createdAt: new Date().toISOString()
     };
 
-    record.name = application.deceasedFullName;
-    record.status = "Reserved";
-    await saveReservationApplication(application);
-    await saveBurialRecords();
+    // A visitor only FILES the application. The administrator approves it, and
+    // only then does the plot become "Reserved". The browser must never write
+    // to burial_records here - a visitor has no permission to do so any more.
+    const saved = await saveReservationApplication(application);
+    if (!saved) {
+        return;
+    }
     const completionMessage = form.querySelector(".application-note");
     if (completionMessage) {
         completionMessage.classList.add("visible");
@@ -1474,17 +1589,27 @@ async function reviewReservationApplication(status) {
     }
 
     await updateReservationApplicationStatus(application, status);
-    if (status === "Rejected") {
-        const record = burialRecords.find((item) => item.id === application.recordId);
-        if (record) {
-            record.status = "Available";
-            record.name = "";
-            await saveBurialRecords();
+
+    const record = burialRecords.find((item) => item.id === application.recordId);
+
+    if (record && status === "Accepted") {
+        // approval is what actually reserves the plot
+        record.status = "Reserved";
+        record.name = application.deceasedFullName;
+        if (!await updateBurialRecord({ id: record.id, status: record.status, name: record.name })) {
+            alert("The plot could not be updated. Please try again.");
         }
+    } else if (record && status === "Rejected") {
+        record.status = "Available";
+        record.name = "";
+        await updateBurialRecord({ id: record.id, status: record.status, name: record.name });
     }
+
     closeReviewApplicationModal();
     renderAdminReservations();
     renderUserReservations();
+    renderMapMarkers();
+    updateDashboardStats();
 }
 
 async function reserveBurialRecord(recordId) {
@@ -1509,6 +1634,9 @@ async function toggleReservationForAdmin(recordId) {
         }
         record.status = "Available";
         record.name = "";
+        // releasing a plot also discards its application, so the plot can be
+        // applied for again and no stale application is left behind
+        await deleteReservationApplicationForRecord(record.id);
     } else if (record.status === "Available") {
         record.status = "Reserved";
     } else {
@@ -1516,7 +1644,7 @@ async function toggleReservationForAdmin(recordId) {
         return;
     }
 
-    await saveBurialRecords();
+    await updateBurialRecord({ id: record.id, status: record.status, name: record.name });
     renderAdminReservations();
     renderUserReservations();
     renderMapMarkers();
@@ -1660,10 +1788,16 @@ function resetRecordForm() {
     dateInput.value = activeRecordMode === "edit" ? "" : getPhilippineDate();
     statusInput.value = "Occupied";
     cleanlinessInput.value = "Clean";
-    latitudeInput.value = 14.954621;
-    longitudeInput.value = 120.896542;
+    // default to the cemetery centre: the old defaults (14.954621 / 120.896542)
+    // are about 9 km away, so saving without touching the fields put the plot
+    // outside the cemetery
+    latitudeInput.value = PLARIDEL_CEMETERY_COORDINATES[0];
+    longitudeInput.value = PLARIDEL_CEMETERY_COORDINATES[1];
     document.getElementById("recordModalTitle").textContent = "Add Burial Record";
-    document.getElementById("saveRecordBtn").textContent = "Save Record";
+
+    const saveButton = document.getElementById("saveRecordBtn");
+    saveButton.textContent = "Save Record";
+    saveButton.disabled = false;
 
     nameInput.disabled = false;
     blockInput.disabled = false;
@@ -1749,6 +1883,24 @@ function isValidLongitude(lng) {
     return typeof lng === 'number' && isFinite(lng) && lng >= -180 && lng <= 180;
 }
 
+/* Block and plot are typed by hand, which is how the database ended up with
+   "C" and "Block C" for the same block, and with "A - 023" next to "A-023".
+   Everything is now stored as "Block X" plus "A-024", which is the same
+   convention that supabase/03_data_integrity.sql applies to the old rows. */
+function normalizeBlock(value) {
+    const trimmed = String(value || "").trim();
+
+    if (!trimmed) {
+        return "";
+    }
+
+    return "Block " + trimmed.replace(/^block\s*/i, "");
+}
+
+function normalizePlot(value) {
+    return String(value || "").replace(/\s+/g, "").trim();
+}
+
 function onRecordCoordinateInputChange(recordId) {
     if (!adminMap) return;
     const latVal = parseFloat(document.getElementById('recordLatitude').value);
@@ -1778,18 +1930,16 @@ async function deleteBurialRecord(recordId) {
         return;
     }
 
-    burialRecords = burialRecords.filter((item) => item.id !== recordId);
-    await saveBurialRecords();
-    await deleteBurialRecordFromSupabase(recordId);
+    if (!await deleteBurialRecordFromSupabase(recordId)) {
+        alert("The record could not be removed. Please try again.");
+        return;
+    }
 
-    addRecentBurialActivity({
-        icon: "fa-solid fa-trash-can",
-        title: "Burial Record Removed",
-        description: `${record.name} • ${record.block} • Plot ${record.plot}`
-    });
+    burialRecords = burialRecords.filter((item) => item.id !== recordId);
 
     renderBurialRecordsTable();
     renderMapMarkers();
+    renderRecentBurialActivity();
     filterAdminRecords(document.getElementById("adminSearchInput")?.value || "");
     toggleAddRecordModal(false);
 }
@@ -1798,13 +1948,14 @@ async function handleAddBurialRecord(event) {
     event.preventDefault();
 
     const name = document.getElementById("recordName").value.trim();
-    const block = document.getElementById("recordBlock").value.trim();
-    const plot = document.getElementById("recordPlot").value.trim();
-    const date = document.getElementById("recordDate").value;
+    const block = normalizeBlock(document.getElementById("recordBlock").value);
+    const plot = normalizePlot(document.getElementById("recordPlot").value);
+    const date = document.getElementById("recordDate").value;          // already YYYY-MM-DD
     const status = document.getElementById("recordStatus").value;
     const cleanliness = document.getElementById("recordCleanliness").value;
     const latitude = parseFloat(document.getElementById("recordLatitude").value);
     const longitude = parseFloat(document.getElementById("recordLongitude").value);
+    const saveButton = document.getElementById("saveRecordBtn");
 
     if (!block || !plot || !date) {
         alert("Please complete all required fields.");
@@ -1816,9 +1967,24 @@ async function handleAddBurialRecord(event) {
         return;
     }
 
+    // coordinates used to be saved without any range check, so a swapped
+    // latitude such as 120.89 could be stored
+    if (!isValidLatitude(latitude) || !isValidLongitude(longitude)) {
+        alert("Please enter a valid latitude (-90 to 90) and longitude (-180 to 180).");
+        return;
+    }
+
+    // stop a double click from creating two records
+    if (saveButton) {
+        saveButton.disabled = true;
+    }
+
     const recordId = document.getElementById("recordId").value;
 
     if (activeRecordMode === "view") {
+        if (saveButton) {
+            saveButton.disabled = false;
+        }
         toggleAddRecordModal(false);
         resetRecordForm();
         return;
@@ -1831,12 +1997,31 @@ async function handleAddBurialRecord(event) {
             existingRecord.name = status === "Available" ? "" : name;
             existingRecord.block = block;
             existingRecord.plot = plot;
-            existingRecord.date = formatDisplayDate(date);
+            existingRecord.date = date;
             existingRecord.status = status;
             existingRecord.cleanliness = cleanliness;
-            if (!Number.isNaN(latitude) && !Number.isNaN(longitude)) {
-                existingRecord.lat = latitude;
-                existingRecord.lng = longitude;
+            existingRecord.lat = latitude;
+            existingRecord.lng = longitude;
+
+            // update ONLY this row - never the whole table
+            const saved = await updateBurialRecord({
+                id: existingRecord.id,
+                name: existingRecord.name,
+                block: existingRecord.block,
+                plot: existingRecord.plot,
+                date: existingRecord.date,
+                status: existingRecord.status,
+                cleanliness: existingRecord.cleanliness,
+                lat: existingRecord.lat,
+                lng: existingRecord.lng
+            });
+
+            if (!saved) {
+                if (saveButton) {
+                    saveButton.disabled = false;
+                }
+                alert(lastRecordSaveMessage || "The record could not be saved. Check your connection and try again.");
+                return;
             }
 
             if (oldCondition !== cleanliness) {
@@ -1844,30 +2029,30 @@ async function handleAddBurialRecord(event) {
             }
         }
     } else {
-        burialRecords.unshift({
-            id: `00${burialRecords.length + 1}`,
+        // the id is not sent: the database assigns it (supabase/02_record_ids.sql)
+        const inserted = await insertBurialRecord({
             name: status === "Available" ? "" : name,
             block,
             plot,
-            date: formatDisplayDate(date),
+            date,
             status,
             cleanliness,
-            lat: !Number.isNaN(latitude) ? latitude : 14.954621,
-            lng: !Number.isNaN(longitude) ? longitude : 120.896542
+            lat: latitude,
+            lng: longitude
         });
-    }
 
-    await saveBurialRecords();
+        if (!inserted) {
+            if (saveButton) {
+                saveButton.disabled = false;
+            }
+            alert(lastRecordSaveMessage || "The record could not be saved. Check your connection and try again.");
+            return;
+        }
+
+        burialRecords.unshift(inserted);
+    }
 
     const updatedRecord = burialRecords.find((item) => item.id === recordId) || burialRecords[0];
-
-    if (updatedRecord) {
-        addRecentBurialActivity({
-            icon: activeRecordMode === "edit" ? "fa-solid fa-pen" : "fa-solid fa-user-plus",
-            title: activeRecordMode === "edit" ? "Burial Record Updated" : "New Burial Record Added",
-            description: `${updatedRecord.name || "Available Plot"} • ${updatedRecord.block} • Plot ${updatedRecord.plot}`
-        });
-    }
 
     if (updatedRecord && adminMarker) {
         adminMarker.setLatLng([updatedRecord.lat, updatedRecord.lng]);
@@ -1883,6 +2068,7 @@ async function handleAddBurialRecord(event) {
 
     renderBurialRecordsTable();
     renderMapMarkers();
+    renderRecentBurialActivity();
     filterAdminRecords(document.getElementById("adminSearchInput")?.value || "");
     resetRecordForm();
     toggleAddRecordModal(false);
@@ -2042,8 +2228,11 @@ function initializeAdminDashboard() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-    const hasAccess = await verifyProtectedPageAccess();
-    if (!hasAccess) {
+    // Every page that loads this file now requires a real Supabase Auth session
+    // with the role that matches the page. This is what stops someone from
+    // opening admin.html directly instead of the old "?user=" URL parameter.
+    const profile = await requireAccess(expectedRoleForPage());
+    if (!profile) {
         return;
     }
 

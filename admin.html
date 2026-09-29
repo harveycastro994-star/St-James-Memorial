@@ -106,19 +106,7 @@ Reservations
 
 <li>
 
-<a href="#">
-
-<i class="fa-solid fa-chart-column"></i>
-
-Reports
-
-</a>
-
-</li>
-
-<li>
-
-<a href="index.html">
+<a href="index.html" onclick="signOutAndGoHome(); return false;">
 
 <i class="fa-solid fa-right-from-bracket"></i>
 
@@ -391,7 +379,7 @@ RECENT ACTIVITY
 
 <h2>
 
-Recent Burial Activity
+Recent Grave Updates
 
 </h2>
 
@@ -464,11 +452,11 @@ GIS-Based Burial Site Mapping and Record Management System
             </label>
             <label>
                 Latitude
-                <input type="number" step="any" id="recordLatitude" value="14.954621">
+                <input type="number" step="any" min="-90" max="90" id="recordLatitude" value="14.883">
             </label>
             <label>
                 Longitude
-                <input type="number" step="any" id="recordLongitude" value="120.896542">
+                <input type="number" step="any" min="-180" max="180" id="recordLongitude" value="120.8614">
             </label>
             <div class="form-actions">
                 <button type="submit" class="add-btn" id="saveRecordBtn">Save Record</button>
@@ -480,19 +468,21 @@ GIS-Based Burial Site Mapping and Record Management System
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="auth.js"></script>
 <script src="script.js"></script>
 <script>
     async function updateRegisteredVisitorsCount() {
         try {
-            const { data, error } = await window.supabase
-                ? window.supabase.createClient("https://ouzfgihgrlssdsqupxit.supabase.co", "sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm")
-                    .from("user_accounts")
-                    .select("id")
-                    .eq("role", "visitor")
-                : { data: [], error: null };
+            // The count used to always show 0: "await" was applied to the
+            // ternary condition instead of to the query, so "data" was an
+            // unresolved Promise and Array.isArray(data) was always false.
+            const { data, error } = await supabaseClient
+                .from("profiles")
+                .select("id")
+                .eq("role", "visitor");
 
             if (error) {
-                console.warn("Unable to load registered visitors count:", error.message);
+                console.warn("Unable to load the registered visitors count:", error.message);
                 return;
             }
 
@@ -501,11 +491,18 @@ GIS-Based Burial Site Mapping and Record Management System
                 statsElement.textContent = Array.isArray(data) ? data.length.toString() : "0";
             }
         } catch (error) {
-            console.warn("Unable to update registered visitors count:", error);
+            console.warn("Unable to update the registered visitors count:", error);
         }
     }
 
-    document.addEventListener("DOMContentLoaded", updateRegisteredVisitorsCount);
+    document.addEventListener("DOMContentLoaded", async () => {
+        // wait for the shared session guard before querying
+        await loadSession();
+        if (!currentSession) {
+            return;
+        }
+        await updateRegisteredVisitorsCount();
+    });
 </script>
 
 </body>

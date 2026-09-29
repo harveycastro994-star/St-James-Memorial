@@ -52,13 +52,7 @@
                 </a>
             </li>
             <li>
-                <a href="#">
-                    <i class="fa-solid fa-chart-column"></i>
-                    Reports
-                </a>
-            </li>
-            <li>
-                <a href="index.html">
+                <a href="index.html" onclick="signOutAndGoHome(); return false;">
                     <i class="fa-solid fa-right-from-bracket"></i>
                     Logout
                 </a>
@@ -150,11 +144,11 @@
                 </label>
                 <label>
                     Latitude
-                    <input type="number" step="any" id="recordLatitude" value="14.954621">
+                    <input type="number" step="any" min="-90" max="90" id="recordLatitude" value="14.883">
                 </label>
                 <label>
                     Longitude
-                    <input type="number" step="any" id="recordLongitude" value="120.896542">
+                    <input type="number" step="any" min="-180" max="180" id="recordLongitude" value="120.8614">
                 </label>
                 <div class="form-actions">
                     <button type="submit" class="add-btn" id="saveRecordBtn">Save Record</button>
@@ -165,6 +159,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="auth.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

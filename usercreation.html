@@ -51,12 +51,7 @@
                 </a>
             </li>
             <li>
-                <a href="#">
-                    <i class="fa-solid fa-chart-column"></i>
-                    Reports
-                </a>
-            </li>
-            <li>
+
                 <a href="index.html">
                     <i class="fa-solid fa-right-from-bracket"></i>
                     Logout
@@ -86,6 +81,10 @@
                 <label>
                     Username
                     <input type="text" id="username" placeholder="Enter username" required>
+                </label>
+                <label>
+                    Email Address
+                    <input type="email" id="email" placeholder="Real email address used to sign in" required>
                 </label>
                 <label>
                     Password
@@ -144,22 +143,21 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="auth.js"></script>
     <script>
-        const supabaseUrl = "https://ouzfgihgrlssdsqupxit.supabase.co";
-        const supabaseKey = "sb_publishable_WS3s-R0mWBNth37TzBdlmg_jcerNWRm";
-        const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
-
+        /* The Supabase client and the session helpers come from auth.js. */
         let userAccounts = [];
         let userCreationBurialRecords = [];
 
         async function loadUsersFromSupabase() {
             const { data, error } = await supabaseClient
-                .from("user_accounts")
+                .from("profiles")
                 .select("*")
-                .order("id");
+                .order("role")
+                .order("username");
 
             if (error) {
-                console.warn("Unable to load user accounts from Supabase:", error.message);
+                console.warn("Unable to load profiles from Supabase:", error.message);
                 userAccounts = [];
                 renderAccounts([]);
                 return;
@@ -169,13 +167,72 @@
             renderAccounts(userAccounts);
         }
 
-        async function saveUserToSupabase(account) {
-            const { error } = await supabaseClient
-                .from("user_accounts")
-                .upsert(account, { onConflict: "id" });
+        /* Creating a login must go through Supabase Auth. A second client that
+           does not keep a session is used so the administrator stays signed in.
+           Requires: Authentication -> Email -> "Confirm email" = OFF. */
+        async function createAuthAccount(fullName, username, email, password) {
+            const tempClient = window.supabase.createClient(supabaseUrl, supabaseKey, {
+                auth: { persistSession: false, autoRefreshToken: false }
+            });
+
+            const { data, error } = await tempClient.auth.signUp({
+                email: email.trim(),
+                password,
+                options: { data: { full_name: fullName, username } }
+            });
 
             if (error) {
-                console.warn("Unable to save user account to Supabase:", error.message);
+                console.warn("Unable to create the account:", error.message);
+
+                /* Duplicate address. Supabase reports this as a REAL error
+                   ("user_already_exists" / HTTP 422) while "Confirm email" is
+                   OFF - which is this application's setting. Verified against
+                   the live project on 2026-09-29. */
+                if (error.code === "user_already_exists" ||
+                    /already\s+(registered|exists)/i.test(error.message || "")) {
+                    return {
+                        duplicateEmail: true,
+                        error: "That email address is already registered. Use a different email address."
+                    };
+                }
+
+                return { error: error.message };
+            }
+
+            if (!data || !data.user) {
+                return { error: "Supabase did not return a new user. Turn OFF \"Confirm email\" in Authentication settings." };
+            }
+
+            /* If "Confirm email" is ever switched ON, Supabase hides the
+               duplicate case behind a decoy user with an EMPTY identities
+               array instead of returning an error. Keep this as a fallback so
+               the behaviour stays correct either way. */
+            if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+                return {
+                    duplicateEmail: true,
+                    error: "That email address is already registered. Use a different email address."
+                };
+            }
+
+            /* If "Confirm email" is ever switched ON there is no session yet.
+               The account and its profile still exist, but the new user cannot
+               sign in until they click the link, so say so instead of
+               reporting a plain success. */
+            if (!data.session) {
+                return { user: data.user, pendingConfirmation: true };
+            }
+
+            return { user: data.user };
+        }
+
+        async function updateProfile(id, changes) {
+            const { error } = await supabaseClient
+                .from("profiles")
+                .update(changes)
+                .eq("id", id);
+
+            if (error) {
+                console.warn("Unable to update the profile:", error.message);
                 return false;
             }
 
@@ -184,31 +241,16 @@
 
         async function deleteUserFromSupabase(id) {
             const { error } = await supabaseClient
-                .from("user_accounts")
+                .from("profiles")
                 .delete()
                 .eq("id", id);
 
             if (error) {
-                console.warn("Unable to delete user account from Supabase:", error.message);
+                console.warn("Unable to delete the profile:", error.message);
+                return false;
             }
-        }
 
-        async function saveAssignmentNotificationToSupabase(notification) {
-            const { error } = await supabaseClient
-                .from("grave_condition_notifications")
-                .upsert({
-                    id: notification.id,
-                    name: notification.name,
-                    block: notification.block,
-                    plot: notification.plot,
-                    old_condition: notification.oldCondition,
-                    new_condition: notification.newCondition,
-                    created_at: new Date(notification.timestamp).toISOString()
-                }, { onConflict: "id" });
-
-            if (error) {
-                console.warn("Unable to save assignment notification to Supabase:", error.message);
-            }
+            return true;
         }
 
         async function getBurialRecordsFromSupabase() {
@@ -230,18 +272,48 @@
             populateGraveSelection();
         }
 
-        async function saveBurialRecords(records) {
-            if (!Array.isArray(records) || records.length === 0) {
+        /* Assigning a grave now only updates the account row. It no longer
+           rewrites the burial record and no longer writes a fake
+           "graves condition" notification (that produced rows such as
+           "Occupied -> Assigned" which visitors were shown as condition news). */
+        async function assignVisitorGrave(profileId, selectedGraveValue) {
+            const records = userCreationBurialRecords;
+            const [block, plot] = (selectedGraveValue || "").split("|");
+
+            const selectedRecord = records.find((record) => record.block === block && record.plot === plot);
+
+            if (!selectedRecord) {
+                return { error: "The selected plot could not be found." };
+            }
+
+            if (!await updateProfile(profileId, { assigned_record_id: selectedRecord.id })) {
+                return { error: "The plot could not be assigned to this account." };
+            }
+
+            return { record: selectedRecord };
+        }
+
+        function renderAccounts(accounts = []) {
+            const body = document.getElementById("accountTableBody");
+            body.innerHTML = "";
+
+            if (!accounts.length) {
+                body.innerHTML = '<tr><td colspan="4" class="empty-state">No accounts created yet.</td></tr>';
                 return;
             }
 
-            const { error } = await supabaseClient
-                .from("burial_records")
-                .upsert(records, { onConflict: "id" });
-
-            if (error) {
-                console.warn("Unable to save burial records from account creation:", error.message);
-            }
+            accounts.forEach((account) => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${account.full_name}</td>
+                    <td>${account.username}</td>
+                    <td>${account.role === "admin" ? "Administrator" : "Visitor"}</td>
+                    <td>
+                        <button type="button" class="table-action-btn delete-btn" onclick="deleteAccount('${account.id}')">Delete</button>
+                    </td>
+                `;
+                body.appendChild(row);
+            });
         }
 
         function populateGraveSelection() {
@@ -260,8 +332,25 @@
             }
 
             const records = userCreationBurialRecords;
+
+            /* Available AND Occupied plots can be assigned. A visitor is often a
+               relative who needs access to the record of someone already
+               buried, not only to an empty plot. "Reserved" stays out because
+               that plot is already promised to another application. */
+            const assignableStatuses = ["Available", "Occupied"];
+
             const allGraves = records
-                .filter((record) => record.status === "Available")
+                .filter((record) => assignableStatuses.includes(record.status))
+                .sort((a, b) => {
+                    // free plots first, so they stay easy to find
+                    if (a.status !== b.status) {
+                        return a.status === "Available" ? -1 : 1;
+                    }
+                    if (a.block !== b.block) {
+                        return String(a.block).localeCompare(String(b.block), undefined, { numeric: true });
+                    }
+                    return String(a.plot).localeCompare(String(b.plot), undefined, { numeric: true });
+                })
                 .map((record) => ({
                     value: `${record.block}|${record.plot}|${record.id}`,
                     label: `${record.block} - Plot ${record.plot} (${record.status})`
@@ -284,81 +373,11 @@
             wrapper.style.display = "block";
         }
 
-        async function assignVisitorGrave(fullName, selectedGraveValue) {
-            const records = userCreationBurialRecords;
-            if (!Array.isArray(records) || records.length === 0) {
-                return null;
-            }
-
-            let selectedRecord = null;
-
-            if (selectedGraveValue) {
-                const [block, plot] = selectedGraveValue.split("|");
-                selectedRecord = records.find((record) => record.block === block && record.plot === plot);
-            }
-
-            if (!selectedRecord) {
-                selectedRecord = records.find((record) => record.status === "Available") || records[0];
-            }
-
-            if (!selectedRecord) {
-                return null;
-            }
-
-            const oldStatus = selectedRecord.status;
-            selectedRecord.name = fullName;
-            selectedRecord.status = "Reserved";
-            selectedRecord.date = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-
-            await saveBurialRecords(records);
-            userCreationBurialRecords = records;
-
-            const notification = {
-                id: `grave-${Date.now()}`,
-                name: fullName,
-                block: selectedRecord.block,
-                plot: selectedRecord.plot,
-                oldCondition: oldStatus,
-                newCondition: "Assigned",
-                timestamp: Date.now()
-            };
-
-            await saveAssignmentNotificationToSupabase(notification);
-
-            return {
-                block: selectedRecord.block,
-                plot: selectedRecord.plot
-            };
-        }
-
-        function renderAccounts(accounts = []) {
-            const body = document.getElementById("accountTableBody");
-            body.innerHTML = "";
-
-            if (!accounts.length) {
-                body.innerHTML = '<tr><td colspan="4" class="empty-state">No accounts created yet.</td></tr>';
-                return;
-            }
-
-            accounts.forEach((account) => {
-                const row = document.createElement("tr");
-                row.innerHTML = `
-                    <td>${account.name}</td>
-                    <td>${account.username}</td>
-                    <td>${account.role === "admin" ? "Administrator" : "Visitor"}</td>
-                    <td>
-                        <button type="button" class="table-action-btn delete-btn" onclick="deleteAccount(${account.id})">Delete</button>
-                    </td>
-                `;
-                body.appendChild(row);
-            });
-        }
-
         async function deleteAccount(id) {
             await deleteUserFromSupabase(id);
             await loadUsersFromSupabase();
             const message = document.getElementById("formMessage");
-            message.textContent = "Account deleted.";
+            message.textContent = "Account deleted. The login itself still exists in Authentication -> Users.";
             message.className = "form-message success";
         }
 
@@ -367,14 +386,29 @@
 
             const fullName = document.getElementById("fullName").value.trim();
             const username = document.getElementById("username").value.trim();
+            const email = document.getElementById("email").value.trim();
             const password = document.getElementById("password").value;
             const confirmPassword = document.getElementById("confirmPassword").value;
             const role = document.getElementById("role").value;
             const message = document.getElementById("formMessage");
 
-            if (!fullName || !username || !password || !confirmPassword || !role) {
+            if (!fullName || !username || !email || !password || !confirmPassword || !role) {
                 message.textContent = "Please complete all fields.";
                 message.className = "form-message error";
+                return;
+            }
+
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                message.textContent = "Please enter a valid email address.";
+                message.className = "form-message error";
+                document.getElementById("email").focus();
+                return;
+            }
+
+            if (password.length < 6) {
+                message.textContent = "The password must be at least 6 characters.";
+                message.className = "form-message error";
+                document.getElementById("password").focus();
                 return;
             }
 
@@ -394,48 +428,70 @@
                 return;
             }
 
-            let newAccount = {
-                id: Date.now(),
-                name: fullName,
-                username,
-                password,
-                role
-            };
-
+            // check the grave BEFORE creating the login, otherwise a failed
+            // validation would leave an account behind with no plot
+            let selectedGraveValue = "";
             if (role === "visitor") {
-                const selectedGraveValue = document.getElementById("graveSelection").value;
+                selectedGraveValue = document.getElementById("graveSelection").value;
                 if (!selectedGraveValue) {
                     message.textContent = "Please select an available grave for the visitor.";
                     message.className = "form-message error";
                     return;
                 }
+            }
 
-                const assignedGrave = await assignVisitorGrave(fullName, selectedGraveValue);
-                if (!assignedGrave) {
-                    message.textContent = "No available grave is currently available.";
+            // 1. create the login in Supabase Auth (the trigger creates the profile)
+            const created = await createAuthAccount(fullName, username, email, password);
+            if (created.duplicateEmail) {
+                message.textContent = created.error;
+                message.className = "form-message error";
+                document.getElementById("email").focus();
+                return;
+            }
+            if (created.error) {
+                message.textContent = "Account could not be created: " + created.error;
+                message.className = "form-message error";
+                return;
+            }
+
+            const profileId = created.user.id;
+
+            // 2. apply the real role and name on the profile row
+            if (!await updateProfile(profileId, { role, full_name: fullName, username })) {
+                message.textContent = "The account was created but its role could not be set. Please reload and try again.";
+                message.className = "form-message error";
+                return;
+            }
+
+            // 3. give the visitor their plot
+            let assignedRecord = null;
+            if (role === "visitor") {
+                const assigned = await assignVisitorGrave(profileId, selectedGraveValue);
+                if (assigned.error) {
+                    message.textContent = "The account was created, but " + assigned.error;
                     message.className = "form-message error";
+                    await loadUsersFromSupabase();
                     return;
                 }
-
-                newAccount = {
-                    ...newAccount,
-                    grave: assignedGrave
-                };
+                assignedRecord = assigned.record;
             }
 
-            const savedToSupabase = await saveUserToSupabase(newAccount);
-            if (savedToSupabase) {
-                await loadUsersFromSupabase();
-            }
+            await loadUsersFromSupabase();
 
             this.reset();
             document.getElementById("graveSelectionWrapper").style.display = "none";
-            message.textContent = savedToSupabase
-                ? (role === "visitor"
-                    ? `Account created successfully. Grave assigned: ${newAccount.grave.block} ${newAccount.grave.plot}`
-                    : "Account created successfully.")
-                : "Account could not be saved to Supabase.";
-            message.className = savedToSupabase ? "form-message success" : "form-message error";
+            let successText = role === "visitor"
+                ? `Account created. Grave assigned: ${assignedRecord.block} / ${assignedRecord.plot}`
+                : "Administrator account created.";
+
+            if (created.pendingConfirmation) {
+                successText += " This user must confirm their email address before they can sign in.";
+                message.className = "form-message error";
+            } else {
+                message.className = "form-message success";
+            }
+
+            message.textContent = successText;
         });
 
         document.getElementById("role").addEventListener("change", populateGraveSelection);
@@ -453,9 +509,18 @@
             });
         });
 
-        renderAccounts();
-        loadBurialRecordsForUserCreation();
-        loadUsersFromSupabase();
+        /* Only an administrator may open this page. This is the guard the page
+           was missing completely before. */
+        (async () => {
+            const profile = await requireAccess("admin");
+            if (!profile) {
+                return;
+            }
+
+            renderAccounts();
+            await loadBurialRecordsForUserCreation();
+            await loadUsersFromSupabase();
+        })();
     </script>
 </body>
 </html>
