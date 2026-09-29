@@ -134,6 +134,9 @@ let reservationApplications = [];
 let cemeteryMap = null;
 let currentMarker = null;
 let userGpsMarker = null;
+let userGpsWatchId = null;
+let userGpsAccuracyCircle = null;
+let userGpsHasCentered = false;
 let selectedBurialRecord = null;
 let navigationRouteLayer = null;
 let selectedAdminBurialRecord = null;
@@ -628,6 +631,97 @@ function renderMapMarkers() {
     }
 }
 
+/* Friendly wording for the three possible geolocation failures. */
+function gpsErrorMessage(error) {
+    const messages = {
+        1: "Location permission was denied. Please allow location access in your browser.",
+        2: "Your location is currently unavailable. Please check your GPS or network connection.",
+        3: "The GPS request timed out. Please try again."
+    };
+
+    return messages[error && error.code] || (error && error.message) || "Unable to get your location.";
+}
+
+/* -------------------------------------------------------------------------
+   The one place the app asks the browser for a location.
+
+   getCurrentPosition() returns whatever the browser has AT THAT INSTANT, which
+   is usually the first and coarsest estimate - on a phone that is the network /
+   WiFi guess, often hundreds of metres or whole kilometres out. watchPosition()
+   keeps delivering updates, so this helper listens until the fix becomes
+   genuinely precise and then stops the watcher.
+
+   It ALWAYS resolves with the best fix received, so a slow or coarse GPS still
+   produces a result instead of a timeout error, and the optional onProgress
+   callback receives every new fix so the page can show "±2400 m..." while the
+   number improves.
+   ------------------------------------------------------------------------- */
+const GPS_GOOD_ENOUGH_METERS = 20;
+const GPS_LONGEST_WAIT_MS = 10000;
+
+function getBestGpsPosition(onProgress) {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error("GPS is not available in this browser."));
+            return;
+        }
+
+        let watchId = null;
+        let bestPosition = null;
+        let settled = false;
+
+        const finish = (position, error) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            clearTimeout(giveUp);
+
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+
+            if (position) {
+                resolve(position);
+            } else {
+                reject(error || new Error("Unable to get your location."));
+            }
+        };
+
+        // a watcher must never be left running, so give up after the maximum wait
+        const giveUp = setTimeout(() => {
+            finish(bestPosition, new Error(gpsErrorMessage({ code: 3 })));
+        }, GPS_LONGEST_WAIT_MS);
+
+        watchId = navigator.geolocation.watchPosition(
+            (position) => {
+                if (!bestPosition || position.coords.accuracy < bestPosition.coords.accuracy) {
+                    bestPosition = position;
+                }
+
+                if (typeof onProgress === "function") {
+                    onProgress(position);
+                }
+
+                // precise enough - there is no reason to keep watching
+                if (position.coords.accuracy <= GPS_GOOD_ENOUGH_METERS) {
+                    finish(position);
+                }
+            },
+            (error) => {
+                // keep a rough fix that already arrived instead of throwing it away
+                finish(bestPosition, new Error(gpsErrorMessage(error)));
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: GPS_LONGEST_WAIT_MS,
+                maximumAge: 0
+            }
+        );
+    });
+}
+
 function initializeMap() {
     const mapElement = document.getElementById("map");
 
@@ -673,35 +767,61 @@ function initializeMap() {
             }
 
             locationButton.disabled = true;
-            locationButton.textContent = "Finding location...";
+            locationButton.textContent = "Tracking location...";
 
-            navigator.geolocation.getCurrentPosition(
+            userGpsWatchId = navigator.geolocation.watchPosition(
                 (position) => {
                     const latitude = position.coords.latitude;
                     const longitude = position.coords.longitude;
                     const accuracy = position.coords.accuracy;
+                    const coordinates = [latitude, longitude];
 
                     if (userGpsMarker) {
-                        userGpsMarker.setLatLng([latitude, longitude]);
+                        userGpsMarker.setLatLng(coordinates);
                     } else {
-                        userGpsMarker = L.marker([latitude, longitude])
+                        userGpsMarker = L.marker(coordinates)
                             .addTo(cemeteryMap)
                             .bindPopup("Device GPS location");
                     }
 
-                    cemeteryMap.setView([latitude, longitude], 20);
+                    if (userGpsAccuracyCircle) {
+                        userGpsAccuracyCircle.setLatLng(coordinates);
+                        userGpsAccuracyCircle.setRadius(accuracy);
+                    } else {
+                        userGpsAccuracyCircle = L.circle(coordinates, {
+                            radius: accuracy,
+                            color: "#2563eb",
+                            fillColor: "#60a5fa",
+                            fillOpacity: 0.2,
+                            weight: 2
+                        }).addTo(cemeteryMap);
+                    }
+
+                    // Center only on the first successful fix; later updates must not move the map.
+                    if (!userGpsHasCentered) {
+                        cemeteryMap.setView(coordinates, 20);
+                        userGpsHasCentered = true;
+                    }
 
                     const userLatitudeElement = document.getElementById("userLatitude");
                     const userLongitudeElement = document.getElementById("userLongitude");
                     if (userLatitudeElement) userLatitudeElement.textContent = latitude.toFixed(6);
                     if (userLongitudeElement) userLongitudeElement.textContent = longitude.toFixed(6);
+                    if (accuracyElement) accuracyElement.textContent = `Accuracy: ±${Math.round(accuracy)} meters`;
 
-                    if (accuracyElement) accuracyElement.textContent = `Estimated GPS accuracy: ${Math.round(accuracy)} meters`;
                     locationButton.disabled = false;
-                    locationButton.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use My GPS Location';
+                    locationButton.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> GPS Tracking Active';
                 },
                 (error) => {
-                    if (accuracyElement) accuracyElement.textContent = `Unable to get location: ${error.message}`;
+                    if (accuracyElement) accuracyElement.textContent = gpsErrorMessage(error);
+
+                    /* Stop the watcher for EVERY error, not only a denied
+                       permission, so the button works again on the next click. */
+                    if (userGpsWatchId !== null) {
+                        navigator.geolocation.clearWatch(userGpsWatchId);
+                        userGpsWatchId = null;
+                    }
+                    userGpsHasCentered = false;
                     locationButton.disabled = false;
                     locationButton.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use My GPS Location';
                 },
@@ -824,18 +944,11 @@ function initializeAdminMap() {
                     if (longitudeElement) longitudeElement.textContent = longitude;
                     if (accuracyElement) accuracyElement.textContent = `Accuracy: ±${Math.round(accuracy)} meters`;
 
-                    adminGpsMarker.hasLoaded = true;
                     locationButton.disabled = false;
                     locationButton.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> GPS Tracking Active';
                 },
                 (error) => {
-                    const errorMessages = {
-                        1: "Location permission was denied. Please allow location access in your browser.",
-                        2: "Your location is currently unavailable. Please check your GPS or network connection.",
-                        3: "The GPS request timed out. Please try again."
-                    };
-
-                    if (accuracyElement) accuracyElement.textContent = errorMessages[error.code] || `Unable to get location: ${error.message}`;
+                    if (accuracyElement) accuracyElement.textContent = gpsErrorMessage(error);
 
                     /* Stop the watcher for EVERY error, not only a denied
                        permission. Before this, gpsWatchId stayed set after a
@@ -1070,7 +1183,7 @@ function navigateToSelectedGrave() {
     }
     if (statusElement) statusElement.textContent = "Getting your current location...";
 
-    navigator.geolocation.getCurrentPosition(async (position) => {
+    getBestGpsPosition().then(async (position) => {
         const startLatitude = position.coords.latitude;
         const startLongitude = position.coords.longitude;
         const endLatitude = Number(record.lat);
@@ -1107,16 +1220,12 @@ function navigateToSelectedGrave() {
                 navigateButton.innerHTML = '<i class="fa-solid fa-route"></i> Navigate to Grave';
             }
         }
-    }, (error) => {
+    }).catch((error) => {
         if (statusElement) statusElement.textContent = `Unable to get location: ${error.message}`;
         if (navigateButton) {
             navigateButton.disabled = false;
             navigateButton.innerHTML = '<i class="fa-solid fa-route"></i> Navigate to Grave';
         }
-    }, {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
     });
 }
 
@@ -1141,7 +1250,7 @@ function navigateToSelectedAdminGrave() {
     }
     if (statusElement) statusElement.textContent = "Getting your current location...";
 
-    navigator.geolocation.getCurrentPosition(async (position) => {
+    getBestGpsPosition().then(async (position) => {
         const startLatitude = position.coords.latitude;
         const startLongitude = position.coords.longitude;
         const endLatitude = Number(record.lat);
@@ -1178,16 +1287,12 @@ function navigateToSelectedAdminGrave() {
                 navigateButton.innerHTML = '<i class="fa-solid fa-route"></i> Navigate to Grave';
             }
         }
-    }, (error) => {
+    }).catch((error) => {
         if (statusElement) statusElement.textContent = `Unable to get location: ${error.message}`;
         if (navigateButton) {
             navigateButton.disabled = false;
             navigateButton.innerHTML = '<i class="fa-solid fa-route"></i> Navigate to Grave';
         }
-    }, {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
     });
 }
 

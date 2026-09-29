@@ -243,7 +243,10 @@ INPUTS
 
     margin-bottom:18px;
 
-    padding:14px;
+    /* Padding sits on the INPUT, not on the wrapper. With padding here the
+       visible box was 51px tall but the tappable text field was only 23px,
+       so a tap in the padding did nothing on a phone. */
+    padding:0 14px;
 
 }
 
@@ -264,6 +267,9 @@ INPUTS
     width:100%;
 
     font-size:15px;
+
+    /* keeps the box the same height as before: 15 + 23 + 15 = 53px */
+    padding:15px 0;
 
 }
 
@@ -1988,8 +1994,21 @@ table {
 }
 
 @media (max-width: 900px) {
+    /* THE MOBILE LOGIN FIX.
+       .container had already been given height:auto + overflow-y:auto, but it
+       then grows to fit its content and never scrolls itself - while body
+       still carried overflow:hidden, which CSS propagates to the VIEWPORT.
+       So the page could not scroll at all: measured at 390x844 the document
+       was 1072px tall and window.scrollY stayed 0, leaving the Visitor role
+       card and the LOGIN button below the fold with no way to reach them. */
+    body:not(.dashboard-body) {
+        overflow-x:hidden;
+        overflow-y:auto;
+    }
+
     .container {
         min-height:100vh;
+        min-height:100dvh;   /* follows the mobile URL bar instead of hiding behind it */
         height:auto;
         overflow-y:auto;
     }
@@ -2009,6 +2028,11 @@ table {
     .card {
         width:min(430px, 100%);
         padding:28px 22px;
+    }
+
+    /* 16px stops iOS Safari zooming the whole page when a field is focused */
+    .inputBox input {
+        font-size:16px;
     }
 }
 
