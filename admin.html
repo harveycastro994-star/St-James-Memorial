@@ -389,6 +389,56 @@ Recent Grave Updates
 
 </section>
 
+<!-- ======================
+LEASE RENEWAL REMINDERS
+====================== -->
+
+<section class="table-section" id="lease-reminders">
+
+<div class="table-header">
+
+<h2>
+
+Lease Renewal Reminders
+
+</h2>
+
+</div>
+
+<p id="leaseReminderSummary" class="lease-summary">-</p>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>Block / Plot</th>
+
+<th>Plot Owner</th>
+
+<th>Visitor Account</th>
+
+<th>Lease Expires</th>
+
+<th>Days Left</th>
+
+<th>Lease Status</th>
+
+<th>Reminder</th>
+
+<th>Action</th>
+
+</tr>
+
+</thead>
+
+<tbody id="leaseReminderTableBody"></tbody>
+
+</table>
+
+</section>
+
 
 
 <!-- ======================
@@ -434,6 +484,14 @@ GIS-Based Burial Site Mapping and Record Management System
             <label>
                 Date of Burial
                 <input type="date" id="recordDate" required>
+            </label>
+            <label>
+                Lease Start Date
+                <input type="date" id="recordLeaseStart">
+            </label>
+            <label>
+                Lease Expiration Date
+                <input type="date" id="recordLeaseExpiration">
             </label>
             <label>
                 Status

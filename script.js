@@ -130,6 +130,25 @@ async function loadBurialRecords() {
 }
 
 const MAX_RECENT_ITEMS = 5;
+
+/* ---- lease renewal reminders (see supabase/04_lease_reminders.sql) ---- */
+const LEASE_DUE_SOON_DAYS = 30;   // 30 days or fewer left -> "Due Soon"
+const LEASE_URGENT_DAYS   = 7;    //  7 days or fewer left -> "Urgent Renewal"
+
+const LEASE_REMINDER = {
+    DUE_SOON: "Lease Renewal Due Soon",
+    URGENT:   "Lease Renewal Reminder",
+    EXPIRED:  "Lease Expired",
+    MANUAL:   "Manual Reminder"
+};
+
+/* Rows from public.lease_reminders. The database already restricts these to
+   the signed-in user, so a visitor only ever receives their own. */
+let leaseReminders = [];
+
+/* burial record id -> the visitor profile that owns it (administrators only). */
+let plotOwnersByRecordId = {};
+
 let reservationApplications = [];
 let cemeteryMap = null;
 let currentMarker = null;
@@ -412,6 +431,459 @@ function expectedRoleForPage() {
     return adminPages.test(path) ? "admin" : "visitor";
 }
 
+/* =========================================================================
+   LEASE RENEWAL REMINDERS
+   -------------------------------------------------------------------------
+   One plot has one lease, so the lease dates live on the burial_records row
+   (lease_start_date / lease_expiration_date), NOT in a separate table.
+
+   The lease STATUS is never stored. It is worked out from the expiration date
+   every time it is displayed, so it can never go stale and nobody has to
+   maintain it day by day.
+   ========================================================================= */
+
+/* Text from the database is put into HTML, so it is escaped first. Plot names
+   originate from reservation applications, which visitors fill in. */
+function escapeHtml(value) {
+    return String(value === null || value === undefined ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+/* "2027-06-30" -> Date at LOCAL midnight. new Date("2027-06-30") would be read
+   as UTC and can land on the previous day in +08:00. */
+function parseDateOnly(value) {
+    const parts = String(value || "").split("-").map(Number);
+
+    if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) {
+        return null;
+    }
+
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+/* Days from today until that date; negative once it has passed.
+   Always calculated from the current date - never stored, never hard-coded. */
+function daysUntil(value) {
+    const target = parseDateOnly(value);
+
+    if (!target) {
+        return null;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+function getLeaseStatus(expirationDate) {
+    const days = daysUntil(expirationDate);
+
+    if (days === null)               return "No Lease";
+    if (days <= 0)                   return "Expired";
+    if (days <= LEASE_URGENT_DAYS)   return "Urgent Renewal";
+    if (days <= LEASE_DUE_SOON_DAYS) return "Due Soon";
+
+    return "Active";
+}
+
+/* The reminder this lease deserves RIGHT NOW, or null while it is Active.
+   The ranges do not overlap, so at most one can ever apply at a time. */
+function getLeaseReminderType(expirationDate) {
+    switch (getLeaseStatus(expirationDate)) {
+        case "Expired":        return LEASE_REMINDER.EXPIRED;
+        case "Urgent Renewal": return LEASE_REMINDER.URGENT;
+        case "Due Soon":       return LEASE_REMINDER.DUE_SOON;
+        default:               return null;
+    }
+}
+
+function leaseStatusClass(status) {
+    return "status " + String(status).toLowerCase().replace(/\s+/g, "-");
+}
+
+function daysRemainingText(days) {
+    if (days === null) return "-";
+    if (days < 0)      return Math.abs(days) + " day" + (Math.abs(days) === 1 ? "" : "s") + " overdue";
+    if (days === 0)    return "Expires today";
+    return days + " day" + (days === 1 ? "" : "s");
+}
+
+/* The wording the visitor reads, and that is stored with the reminder. */
+function buildLeaseReminderMessage(record, reminderType) {
+    const days = daysUntil(record.lease_expiration_date);
+    const expires = formatDisplayDate(record.lease_expiration_date);
+    const where = record.block + ", Plot " + record.plot;
+
+    if (reminderType === LEASE_REMINDER.EXPIRED || days <= 0) {
+        return `Your cemetery plot lease for ${where} expired on ${expires}. Please contact the cemetery administration for lease renewal.`;
+    }
+
+    return `Your cemetery plot lease for ${where} will expire on ${expires} (${days} day${days === 1 ? "" : "s"} remaining). Please contact the cemetery administration for lease renewal.`;
+}
+
+async function loadLeaseRemindersFromSupabase() {
+    if (!supabaseClient) {
+        return;
+    }
+
+    const { data, error } = await supabaseClient
+        .from("lease_reminders")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        console.warn("Unable to load lease reminders from Supabase:", error.message);
+        return;
+    }
+
+    leaseReminders = Array.isArray(data) ? data : [];
+}
+
+/* Which visitor owns which plot - profiles.assigned_record_id is the link.
+   Only an administrator may read other people's profiles, so this is only
+   called on the admin dashboard. */
+async function loadPlotOwners() {
+    if (!supabaseClient) {
+        return;
+    }
+
+    const { data, error } = await supabaseClient
+        .from("profiles")
+        .select("id, full_name, username, role, assigned_record_id")
+        .not("assigned_record_id", "is", null);
+
+    if (error) {
+        console.warn("Unable to load plot owners:", error.message);
+        return;
+    }
+
+    plotOwnersByRecordId = {};
+    (data || []).forEach((profile) => {
+        plotOwnersByRecordId[profile.assigned_record_id] = profile;
+    });
+}
+
+function getPlotOwner(recordId) {
+    return plotOwnersByRecordId[recordId] || null;
+}
+
+function findStoredLeaseReminder(recordId, reminderType, expirationDate) {
+    if (!reminderType) {
+        return null;
+    }
+
+    return leaseReminders.find((row) =>
+        row.record_id === recordId &&
+        row.reminder_type === reminderType &&
+        row.lease_expiration_date === expirationDate) || null;
+}
+
+/* Writes one reminder. The table has UNIQUE (record_id, reminder_type,
+   lease_expiration_date), so a duplicate is impossible: error 23505 simply
+   means "already there" and is not a failure. */
+async function saveLeaseReminder({ record, reminderType, recipientProfileId, sentBy = null }) {
+    if (!supabaseClient || !record || !recipientProfileId || !record.lease_expiration_date) {
+        return { error: "missing lease information" };
+    }
+
+    const { data, error } = await supabaseClient
+        .from("lease_reminders")
+        .insert({
+            record_id: record.id,
+            recipient_profile_id: recipientProfileId,
+            reminder_type: reminderType,
+            message: buildLeaseReminderMessage(record, reminderType),
+            lease_expiration_date: record.lease_expiration_date,
+            sent_by: sentBy
+        })
+        .select()
+        .single();
+
+    if (error) {
+        if (error.code === "23505") {
+            return { duplicate: true };
+        }
+
+        console.warn("Unable to save the lease reminder:", error.message);
+        return { error: error.message };
+    }
+
+    leaseReminders = [data, ...leaseReminders];
+    return { reminder: data };
+}
+
+/* Runs once after sign-in. Creates the one reminder the lease currently
+   deserves, and nothing else - so loading the page a hundred times still
+   results in exactly one reminder per lease period. This is also what makes
+   the reminder appear on any device: it lives in Supabase, not in the browser. */
+async function generateDueLeaseReminders() {
+    const profile = getCachedProfile();
+
+    if (!profile || profile.role === "admin" || !profile.assigned_record_id) {
+        return;
+    }
+
+    const record = burialRecords.find((item) => item.id === profile.assigned_record_id)
+                || profile.assigned_record
+                || null;
+
+    if (!record || !record.lease_expiration_date) {
+        return;
+    }
+
+    const reminderType = getLeaseReminderType(record.lease_expiration_date);
+
+    if (!reminderType) {
+        return;   // the lease is still Active
+    }
+
+    if (findStoredLeaseReminder(record.id, reminderType, record.lease_expiration_date)) {
+        return;   // already recorded for this lease period
+    }
+
+    await saveLeaseReminder({ record, reminderType, recipientProfileId: profile.id });
+}
+
+function getAssignedPlotRecord() {
+    const profile = getCachedProfile();
+
+    if (!profile || !profile.assigned_record_id) {
+        return null;
+    }
+
+    return burialRecords.find((item) => item.id === profile.assigned_record_id)
+        || profile.assigned_record
+        || null;
+}
+
+/* The reminders the signed-in visitor should see: the one their lease
+   currently deserves, plus anything an administrator sent by hand. Only the
+   CURRENT lease period is shown, so renewing a lease clears the old reminder
+   by itself. */
+function leaseReminderItemsForRecord(record) {
+    const items = [];
+
+    if (!record || !record.lease_expiration_date) {
+        return items;
+    }
+
+    const reminderType = getLeaseReminderType(record.lease_expiration_date);
+
+    if (reminderType) {
+        const stored = findStoredLeaseReminder(record.id, reminderType, record.lease_expiration_date);
+
+        items.push({
+            title: reminderType,
+            message: buildLeaseReminderMessage(record, reminderType),
+            when: stored
+                ? "Recorded " + formatRelativeActivityTime(new Date(stored.created_at).getTime())
+                : "Due now"
+        });
+    }
+
+    leaseReminders
+        .filter((row) => row.record_id === record.id
+            && row.reminder_type === LEASE_REMINDER.MANUAL
+            && row.lease_expiration_date === record.lease_expiration_date)
+        .forEach((row) => items.push({
+            title: LEASE_REMINDER.URGENT,
+            message: row.message,
+            when: "Sent by the administration " + formatRelativeActivityTime(new Date(row.created_at).getTime())
+        }));
+
+    return items;
+}
+
+function getVisitorLeaseReminderItems() {
+    return leaseReminderItemsForRecord(getAssignedPlotRecord());
+}
+
+/* -------------------------------------------------------------------------
+   VISITOR - the Lease Renewal card
+   ------------------------------------------------------------------------- */
+function renderLeaseSummary() {
+    const summaryElement = document.getElementById("leaseSummary");
+    const listElement = document.getElementById("leaseReminderList");
+
+    if (!summaryElement || !listElement) {
+        return;
+    }
+
+    const record = getAssignedPlotRecord();
+
+    if (!record) {
+        summaryElement.innerHTML = '<div class="lease-row"><span>Assigned plot</span><strong>None yet</strong></div>';
+        listElement.innerHTML = '<div class="notification-empty">No cemetery plot is assigned to your account yet.</div>';
+        return;
+    }
+
+    const days = daysUntil(record.lease_expiration_date);
+    const status = getLeaseStatus(record.lease_expiration_date);
+
+    summaryElement.innerHTML = `
+        <div class="lease-row"><span>Block / Plot</span><strong>${escapeHtml(record.block)} / ${escapeHtml(record.plot)}</strong></div>
+        <div class="lease-row"><span>Plot Owner</span><strong>${escapeHtml(record.name || "Available Plot")}</strong></div>
+        <div class="lease-row"><span>Lease Start</span><strong>${record.lease_start_date ? escapeHtml(formatDisplayDate(record.lease_start_date)) : "-"}</strong></div>
+        <div class="lease-row"><span>Lease Expiration</span><strong>${record.lease_expiration_date ? escapeHtml(formatDisplayDate(record.lease_expiration_date)) : "-"}</strong></div>
+        <div class="lease-row"><span>Days Remaining</span><strong>${daysRemainingText(days)}</strong></div>
+        <div class="lease-row"><span>Lease Status</span><strong><span class="${leaseStatusClass(status)}">${status}</span></strong></div>
+    `;
+
+    const items = leaseReminderItemsForRecord(record);
+
+    // "active" and "no lease recorded at all" are different situations
+    const emptyMessage = status === "No Lease"
+        ? "No lease has been recorded for your plot yet. Please contact the cemetery administration."
+        : "Your lease is active. There is nothing to renew at the moment.";
+
+    listElement.innerHTML = items.length === 0
+        ? `<div class="notification-empty">${emptyMessage}</div>`
+        : items.map((item) => `
+            <div class="notification-item lease">
+                <p><strong>&#128276; ${escapeHtml(item.title)}</strong></p>
+                <p>${escapeHtml(item.message)}</p>
+                <span>${escapeHtml(item.when)}</span>
+            </div>
+        `).join("");
+}
+
+/* -------------------------------------------------------------------------
+   ADMIN - the Lease Renewal Reminders table
+   ------------------------------------------------------------------------- */
+/* Every plot with a lease that is not simply Active, most urgent first. */
+function getLeaseAttentionRows() {
+    return burialRecords
+        .filter((record) => record.lease_expiration_date)
+        .map((record) => {
+            const days = daysUntil(record.lease_expiration_date);
+            return { record, days, status: getLeaseStatus(record.lease_expiration_date) };
+        })
+        .filter((row) => row.status !== "Active")
+        .sort((a, b) => a.days - b.days);
+}
+
+function renderAdminLeaseReminders() {
+    const body = document.getElementById("leaseReminderTableBody");
+    const summaryElement = document.getElementById("leaseReminderSummary");
+
+    if (!body) {
+        return;
+    }
+
+    const rows = getLeaseAttentionRows();
+    const expired = rows.filter((row) => row.days <= 0).length;
+    const within7 = rows.filter((row) => row.days > 0 && row.days <= LEASE_URGENT_DAYS).length;
+    const within30 = rows.filter((row) => row.days > LEASE_URGENT_DAYS && row.days <= LEASE_DUE_SOON_DAYS).length;
+
+    if (summaryElement) {
+        summaryElement.textContent = rows.length === 0
+            ? "No leases need attention right now."
+            : `${rows.length} lease${rows.length === 1 ? "" : "s"} need attention - ${expired} expired, ${within7} expiring within 7 days, ${within30} within 30 days.`;
+    }
+
+    if (rows.length === 0) {
+        body.innerHTML = '<tr><td colspan="8" class="empty-state">No leases need attention right now.</td></tr>';
+        return;
+    }
+
+    body.innerHTML = rows.map(({ record, days, status }) => {
+        const owner = getPlotOwner(record.id);
+        const dueType = getLeaseReminderType(record.lease_expiration_date);
+        const manual = findStoredLeaseReminder(record.id, LEASE_REMINDER.MANUAL, record.lease_expiration_date);
+        const automatic = findStoredLeaseReminder(record.id, dueType, record.lease_expiration_date);
+        const last = manual || automatic;
+
+        const reminderCell = last
+            ? `${escapeHtml(last.reminder_type)}<br><span class="lease-sent">${manual ? "by admin" : "automatic"} ${formatRelativeActivityTime(new Date(last.created_at).getTime())}</span>`
+            : '<span class="status no-lease">Not sent</span>';
+
+        const actionCell = owner
+            ? `<button class="table-action-btn" data-action="send-lease-reminder" data-record-id="${record.id}">${manual ? "Resend Reminder" : "Send Reminder"}</button>`
+            : '<span class="status no-lease">No owner assigned</span>';
+
+        return `
+        <tr data-name="${escapeHtml(record.name)}" data-block="${escapeHtml(record.block)}" data-plot="${escapeHtml(record.plot)}">
+            <td>${escapeHtml(record.block.replace("Block ", ""))} / ${escapeHtml(record.plot)}</td>
+            <td>${escapeHtml(record.name || "Available Plot")}</td>
+            <td>${owner ? escapeHtml(owner.full_name) : "-"}</td>
+            <td>${escapeHtml(formatDisplayDate(record.lease_expiration_date))}</td>
+            <td>${daysRemainingText(days)}</td>
+            <td><span class="${leaseStatusClass(status)}">${status}</span></td>
+            <td>${reminderCell}</td>
+            <td>${actionCell}</td>
+        </tr>
+    `;
+    }).join("");
+}
+
+/* "Send Reminder" - finds the plot owner, records a Manual Reminder addressed
+   to that account only, and reports the result. The unique constraint means a
+   reminder can never be recorded twice for the same lease period, so if one
+   already exists the administrator is asked before it is replaced. */
+async function sendLeaseReminder(recordId) {
+    const record = burialRecords.find((item) => item.id === recordId);
+
+    if (!record) {
+        return;
+    }
+
+    if (!record.lease_expiration_date) {
+        alert("This plot has no lease expiration date yet. Add one by editing the burial record.");
+        return;
+    }
+
+    const owner = getPlotOwner(record.id);
+
+    if (!owner) {
+        alert("This plot has no visitor account assigned, so there is nobody to remind. Assign the grave to a visitor on the User page first.");
+        return;
+    }
+
+    const existing = findStoredLeaseReminder(record.id, LEASE_REMINDER.MANUAL, record.lease_expiration_date);
+
+    if (existing) {
+        const sentOn = new Date(existing.created_at).toLocaleString();
+
+        if (!confirm(`A lease reminder for ${record.block}, Plot ${record.plot} was already sent to ${owner.full_name} on ${sentOn}. Send another one?`)) {
+            return;
+        }
+
+        const { error: deleteError } = await supabaseClient
+            .from("lease_reminders")
+            .delete()
+            .eq("id", existing.id);
+
+        if (deleteError) {
+            console.warn("Unable to replace the previous lease reminder:", deleteError.message);
+            alert("The previous reminder could not be replaced. Please try again.");
+            return;
+        }
+
+        leaseReminders = leaseReminders.filter((row) => row.id !== existing.id);
+    }
+
+    const profile = getCachedProfile();
+    const saved = await saveLeaseReminder({
+        record,
+        reminderType: LEASE_REMINDER.MANUAL,
+        recipientProfileId: owner.id,
+        sentBy: profile ? profile.id : null
+    });
+
+    if (saved.error) {
+        alert("The reminder could not be sent: " + saved.error);
+        return;
+    }
+
+    renderAdminLeaseReminders();
+    alert(`Lease reminder sent to ${owner.full_name} for ${record.block}, Plot ${record.plot}.`);
+}
+
 async function renderConditionNotifications() {
     const listElement = document.getElementById("conditionNotificationList");
     const badgeElement = document.getElementById("notificationBadge");
@@ -423,7 +895,9 @@ async function renderConditionNotifications() {
     const notifications = (supabaseNotifications || getGraveConditionNotifications())
         .filter(notificationBelongsToCurrentUser)
         .slice(0, MAX_RECENT_ITEMS);
-    const count = notifications.length;
+
+    // a due or expired lease counts towards the same bell
+    const count = notifications.length + getVisitorLeaseReminderItems().length;
 
     if (badgeElement) {
         badgeElement.textContent = count > 0 ? count : "";
@@ -1885,6 +2359,8 @@ function resetRecordForm() {
     const cleanlinessInput = document.getElementById("recordCleanliness");
     const latitudeInput = document.getElementById("recordLatitude");
     const longitudeInput = document.getElementById("recordLongitude");
+    const leaseStartInput = document.getElementById("recordLeaseStart");
+    const leaseExpirationInput = document.getElementById("recordLeaseExpiration");
 
     document.getElementById("recordId").value = "";
     nameInput.value = "";
@@ -1893,6 +2369,8 @@ function resetRecordForm() {
     dateInput.value = activeRecordMode === "edit" ? "" : getPhilippineDate();
     statusInput.value = "Occupied";
     cleanlinessInput.value = "Clean";
+    if (leaseStartInput) leaseStartInput.value = "";
+    if (leaseExpirationInput) leaseExpirationInput.value = "";
     // default to the cemetery centre: the old defaults (14.954621 / 120.896542)
     // are about 9 km away, so saving without touching the fields put the plot
     // outside the cemetery
@@ -1912,6 +2390,8 @@ function resetRecordForm() {
     cleanlinessInput.disabled = false;
     latitudeInput.disabled = false;
     longitudeInput.disabled = false;
+    if (leaseStartInput) leaseStartInput.disabled = false;
+    if (leaseExpirationInput) leaseExpirationInput.disabled = false;
     // remove live listeners when resetting
     latitudeInput.oninput = null;
     longitudeInput.oninput = null;
@@ -1930,6 +2410,8 @@ function openRecordModal(mode, record) {
     const cleanlinessInput = document.getElementById("recordCleanliness");
     const latitudeInput = document.getElementById("recordLatitude");
     const longitudeInput = document.getElementById("recordLongitude");
+    const leaseStartInput = document.getElementById("recordLeaseStart");
+    const leaseExpirationInput = document.getElementById("recordLeaseExpiration");
 
     activeRecordMode = mode;
     resetRecordForm();
@@ -1949,6 +2431,8 @@ function openRecordModal(mode, record) {
         statusInput.value = record.status;
         latitudeInput.value = record.lat;
         longitudeInput.value = record.lng;
+        if (leaseStartInput) leaseStartInput.value = record.lease_start_date || "";
+        if (leaseExpirationInput) leaseExpirationInput.value = record.lease_expiration_date || "";
         updateNameFieldRequirement(record.status);
         // live update the admin map when coordinates are changed in the form
         editingRecordId = record.id;
@@ -1966,6 +2450,8 @@ function openRecordModal(mode, record) {
         cleanlinessInput.value = record.cleanliness || "Clean";
         latitudeInput.value = record.lat;
         longitudeInput.value = record.lng;
+        if (leaseStartInput) leaseStartInput.value = record.lease_start_date || "";
+        if (leaseExpirationInput) leaseExpirationInput.value = record.lease_expiration_date || "";
 
         nameInput.disabled = true;
         blockInput.disabled = true;
@@ -1975,6 +2461,8 @@ function openRecordModal(mode, record) {
         cleanlinessInput.disabled = true;
         latitudeInput.disabled = true;
         longitudeInput.disabled = true;
+        if (leaseStartInput) leaseStartInput.disabled = true;
+        if (leaseExpirationInput) leaseExpirationInput.disabled = true;
     }
 
     toggleAddRecordModal(true);
@@ -2060,6 +2548,10 @@ async function handleAddBurialRecord(event) {
     const cleanliness = document.getElementById("recordCleanliness").value;
     const latitude = parseFloat(document.getElementById("recordLatitude").value);
     const longitude = parseFloat(document.getElementById("recordLongitude").value);
+    const leaseStartInput = document.getElementById("recordLeaseStart");
+    const leaseExpirationInput = document.getElementById("recordLeaseExpiration");
+    const leaseStartDate = leaseStartInput && leaseStartInput.value ? leaseStartInput.value : null;
+    const leaseExpirationDate = leaseExpirationInput && leaseExpirationInput.value ? leaseExpirationInput.value : null;
     const saveButton = document.getElementById("saveRecordBtn");
 
     if (!block || !plot || !date) {
@@ -2076,6 +2568,12 @@ async function handleAddBurialRecord(event) {
     // latitude such as 120.89 could be stored
     if (!isValidLatitude(latitude) || !isValidLongitude(longitude)) {
         alert("Please enter a valid latitude (-90 to 90) and longitude (-180 to 180).");
+        return;
+    }
+
+    // a lease cannot expire before it starts (the database enforces this too)
+    if (leaseStartDate && leaseExpirationDate && leaseExpirationDate < leaseStartDate) {
+        alert("The lease expiration date cannot be before the lease start date.");
         return;
     }
 
@@ -2107,6 +2605,8 @@ async function handleAddBurialRecord(event) {
             existingRecord.cleanliness = cleanliness;
             existingRecord.lat = latitude;
             existingRecord.lng = longitude;
+            existingRecord.lease_start_date = leaseStartDate;
+            existingRecord.lease_expiration_date = leaseExpirationDate;
 
             // update ONLY this row - never the whole table
             const saved = await updateBurialRecord({
@@ -2118,7 +2618,9 @@ async function handleAddBurialRecord(event) {
                 status: existingRecord.status,
                 cleanliness: existingRecord.cleanliness,
                 lat: existingRecord.lat,
-                lng: existingRecord.lng
+                lng: existingRecord.lng,
+                lease_start_date: existingRecord.lease_start_date,
+                lease_expiration_date: existingRecord.lease_expiration_date
             });
 
             if (!saved) {
@@ -2143,7 +2645,9 @@ async function handleAddBurialRecord(event) {
             status,
             cleanliness,
             lat: latitude,
-            lng: longitude
+            lng: longitude,
+            lease_start_date: leaseStartDate,
+            lease_expiration_date: leaseExpirationDate
         });
 
         if (!inserted) {
@@ -2174,6 +2678,7 @@ async function handleAddBurialRecord(event) {
     renderBurialRecordsTable();
     renderMapMarkers();
     renderRecentBurialActivity();
+    renderAdminLeaseReminders();
     filterAdminRecords(document.getElementById("adminSearchInput")?.value || "");
     resetRecordForm();
     toggleAddRecordModal(false);
@@ -2189,6 +2694,7 @@ function initializeBurialSearch() {
     initializeMap();
     renderRecentSearches();
     renderConditionNotifications();
+    renderLeaseSummary();
     initializeProfileSidebar();
 
     if (searchButton) {
@@ -2202,13 +2708,17 @@ function initializeBurialSearch() {
     if (notificationButton) {
         notificationButton.addEventListener("click", () => {
             const notificationBadge = document.getElementById("notificationBadge");
+            const leaseSection = document.getElementById("leaseReminderSection");
             const section = document.getElementById("conditionNotificationSection");
             if (notificationBadge) {
                 notificationBadge.textContent = "";
                 notificationBadge.style.display = "none";
             }
-            if (section) {
-                section.scrollIntoView({ behavior: "smooth", block: "start" });
+            // a lease that needs renewing matters more than a condition update,
+            // so the bell goes there first
+            const target = (getVisitorLeaseReminderItems().length > 0 && leaseSection) ? leaseSection : section;
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "start" });
             }
         });
     }
@@ -2225,6 +2735,7 @@ function initializeBurialSearch() {
 function initializeAdminDashboard() {
     initializeAdminMap();
     updateDashboardStats();
+    renderAdminLeaseReminders();
 
     const openButton = document.getElementById("openAddRecordBtn");
     const closeButton = document.getElementById("closeAddRecordModal");
@@ -2325,6 +2836,18 @@ function initializeAdminDashboard() {
         });
     }
 
+    const leaseTableBody = document.getElementById("leaseReminderTableBody");
+
+    if (leaseTableBody) {
+        leaseTableBody.addEventListener("click", async (event) => {
+            const button = event.target.closest(".table-action-btn");
+
+            if (button && button.dataset.action === "send-lease-reminder") {
+                await sendLeaseReminder(button.dataset.recordId);
+            }
+        });
+    }
+
     document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
             toggleAddRecordModal(false);
@@ -2343,6 +2866,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     burialRecords = await loadBurialRecords();
     await loadReservationApplications();
+
+    /* Lease reminders are stored in Supabase, so they follow the account to any
+       device. loadPlotOwners() is for administrators only (a visitor may not
+       read other people's profiles) and generateDueLeaseReminders() writes the
+       single reminder the visitor's lease currently deserves - a duplicate is
+       impossible because of the unique constraint on the table. */
+    await loadLeaseRemindersFromSupabase();
+
+    if (profile.role === "admin") {
+        await loadPlotOwners();
+    }
+
+    await generateDueLeaseReminders();
+
     updateDashboardStats();
     initializeBurialSearch();
     initializeAdminDashboard();
