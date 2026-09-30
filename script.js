@@ -2030,11 +2030,12 @@ function renderAdminReservations() {
     }
 
     tableBody.innerHTML = burialRecords.map((record) => {
-        /* Show the application for every plot that has one, including a
-           rejected one. Previously the button only appeared while the plot was
-           Reserved, so a rejected application could never be reviewed again. */
+        /* The button is for applications still awaiting a decision. Accepting
+           reserves the plot and rejecting returns it to Available, so once
+           either has happened the decision is made: only Pending applications
+           offer View Application, and only Pending can be reviewed again. */
         const application = getReservationApplication(record.id);
-        const applicationButton = application
+        const applicationButton = application && application.status === "Pending"
             ? `<button class="table-action-btn" data-action="view-application" data-record-id="${record.id}">View Application (${application.status})</button>`
             : "";
 
@@ -2181,6 +2182,12 @@ async function reviewReservationApplication(status) {
     } else if (record && status === "Rejected") {
         record.status = "Available";
         record.name = "";
+        /* A rejection is a finished decision, so the application is discarded.
+           This matters because reservation_applications.record_id is UNIQUE:
+           a leftover rejected row would block every future application for
+           this plot with error 23505 ("This plot already has a reservation
+           application.") even though the plot is Available again. */
+        await deleteReservationApplicationForRecord(record.id);
         await updateBurialRecord({ id: record.id, status: record.status, name: record.name });
     }
 
