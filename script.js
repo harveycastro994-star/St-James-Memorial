@@ -149,6 +149,10 @@ let leaseReminders = [];
 /* burial record id -> the visitor profile that owns it (administrators only). */
 let plotOwnersByRecordId = {};
 
+/* "block|plot" -> the same profile. Second index so every row of a plot
+   resolves to its owner, even if the link points at a different row. */
+let plotOwnersByPlotKey = {};
+
 let reservationApplications = [];
 let cemeteryMap = null;
 let currentMarker = null;
@@ -563,13 +567,60 @@ async function loadPlotOwners() {
     }
 
     plotOwnersByRecordId = {};
+    plotOwnersByPlotKey = {};
     (data || []).forEach((profile) => {
         plotOwnersByRecordId[profile.assigned_record_id] = profile;
+
+        /* profiles.assigned_record_id points at ONE burial_records row. If a plot
+           were ever held by more than one row, the owner would otherwise only be
+           found for the row the link points at. Keying on block + plot as well
+           means every row of that plot resolves to the same owner. */
+        const plot = burialRecords.find((item) => item.id === profile.assigned_record_id);
+        if (plot) {
+            plotOwnersByPlotKey[plotOwnerKey(plot)] = profile;
+        }
     });
 }
 
 function getPlotOwner(recordId) {
     return plotOwnersByRecordId[recordId] || null;
+}
+
+/* A stable key for "the plot", built the same way supabase/03_data_integrity.sql
+   normalises the stored values ("Block C" + "C-47"), so "Block C"/"C" and
+   "A - 023"/"A-023" still resolve to the same plot. */
+function plotOwnerKey(record) {
+    const block = String(record.block || "").toLowerCase().replace(/^block\s*/, "").replace(/\s+/g, "");
+    const plot = String(record.plot || "").toLowerCase().replace(/\s+/g, "");
+    return block + "|" + plot;
+}
+
+/* The owner of the plot a burial record sits in.
+   1) the account linked to this exact row (profiles.assigned_record_id), then
+   2) the account linked to whichever row holds the same block + plot.
+   Returns null when nobody owns the plot - the record is still displayed. */
+function getPlotOwnerForRecord(record) {
+    if (!record) {
+        return null;
+    }
+
+    if (plotOwnersByRecordId[record.id]) {
+        return plotOwnersByRecordId[record.id];
+    }
+
+    return plotOwnersByPlotKey[plotOwnerKey(record)] || null;
+}
+
+/* The name to display. Empty string when the plot has no owner account, so the
+   caller can decide what to show (the table shows "Not Assigned"). */
+function getPlotOwnerName(record) {
+    const owner = getPlotOwnerForRecord(record);
+
+    if (!owner) {
+        return "";
+    }
+
+    return owner.full_name || owner.username || "";
 }
 
 function findStoredLeaseReminder(recordId, reminderType, expirationDate) {
@@ -1496,10 +1547,11 @@ function findMatchingRecord(query) {
     }
 
     return burialRecords.find((record) => {
-        const fullName = record.name.toLowerCase();
-        const block = record.block.toLowerCase();
-        const plot = record.plot.toLowerCase();
-        return fullName === searchTerm || block === searchTerm || plot === searchTerm || fullName.includes(searchTerm) || block.includes(searchTerm) || plot.includes(searchTerm);
+        const fullName = String(record.name || "").toLowerCase();
+        const block = String(record.block || "").toLowerCase();
+        const plot = String(record.plot || "").toLowerCase();
+        const owner = getPlotOwnerName(record).toLowerCase();
+        return fullName === searchTerm || block === searchTerm || plot === searchTerm || owner === searchTerm || fullName.includes(searchTerm) || block.includes(searchTerm) || plot.includes(searchTerm) || owner.includes(searchTerm);
     }) || null;
 }
 
@@ -1512,7 +1564,11 @@ function filterAdminRecords(searchValue) {
         const rowName = (row.dataset.name || "").toLowerCase();
         const rowBlock = (row.dataset.block || "").toLowerCase();
         const rowPlot = (row.dataset.plot || "").toLowerCase();
-        const isMatch = !query || rowName === query || rowBlock === query || rowPlot === query || rowName.includes(query) || rowBlock.includes(query) || rowPlot.includes(query);
+        /* the plot owner is searchable too, so typing the owner's name returns
+           the burial record that sits in their plot (data-owner is filled in by
+           renderBurialRecordsTable from profiles.assigned_record_id) */
+        const rowOwner = (row.dataset.owner || "").toLowerCase();
+        const isMatch = !query || rowName === query || rowBlock === query || rowPlot === query || rowOwner === query || rowName.includes(query) || rowBlock.includes(query) || rowPlot.includes(query) || rowOwner.includes(query);
 
         row.classList.toggle("table-row-hidden", !isMatch);
         row.classList.toggle("table-row-highlight", isMatch && query);
@@ -1906,21 +1962,30 @@ function renderBurialRecordsTable() {
         return;
     }
 
-    tableBody.innerHTML = burialRecords.map((record) => `
-        <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}">
-            <td>${record.id}</td>
-            <td>${record.name}</td>
-            <td>${record.block.replace("Block ", "")}</td>
-            <td>${record.plot}</td>
+    tableBody.innerHTML = burialRecords.map((record) => {
+        /* The owner is READ from the database relationship
+           (profiles.assigned_record_id -> burial_records.id) every time the
+           table is drawn - it is never copied onto the burial record itself and
+           never typed in by hand. A plot without an owner still appears here. */
+        const ownerName = getPlotOwnerName(record);
+
+        return `
+        <tr data-name="${escapeHtml(record.name)}" data-block="${escapeHtml(record.block)}" data-plot="${escapeHtml(record.plot)}" data-owner="${escapeHtml(ownerName)}">
+            <td>${escapeHtml(record.id)}</td>
+            <td>${escapeHtml(record.name)}</td>
+            <td>${escapeHtml(String(record.block || "").replace("Block ", ""))}</td>
+            <td>${escapeHtml(record.plot)}</td>
+            <td class="owner-cell">${ownerName ? escapeHtml(ownerName) : '<span class="owner-none">Not Assigned</span>'}</td>
             <td>${displayDate(record.date)}</td>
-            <td><span class="status ${record.status.toLowerCase()}">${record.status}</span></td>
+            <td><span class="status ${escapeHtml(String(record.status || "").toLowerCase())}">${escapeHtml(record.status)}</span></td>
             <td>
-                <button class="table-action-btn" data-action="edit" data-record-id="${record.id}">Edit</button>
-                <button class="table-action-btn" data-action="view" data-record-id="${record.id}">View</button>
-                <button class="table-action-btn delete-btn" data-action="delete" data-record-id="${record.id}">Remove</button>
+                <button class="table-action-btn" data-action="edit" data-record-id="${escapeHtml(record.id)}">Edit</button>
+                <button class="table-action-btn" data-action="view" data-record-id="${escapeHtml(record.id)}">View</button>
+                <button class="table-action-btn delete-btn" data-action="delete" data-record-id="${escapeHtml(record.id)}">Remove</button>
             </td>
         </tr>
-    `).join("");
+    `;
+    }).join("");
 
     updateDashboardStats();
 }
@@ -2368,6 +2433,7 @@ function resetRecordForm() {
     const longitudeInput = document.getElementById("recordLongitude");
     const leaseStartInput = document.getElementById("recordLeaseStart");
     const leaseExpirationInput = document.getElementById("recordLeaseExpiration");
+    const ownerInput = document.getElementById("recordPlotOwner");
 
     document.getElementById("recordId").value = "";
     nameInput.value = "";
@@ -2399,6 +2465,10 @@ function resetRecordForm() {
     longitudeInput.disabled = false;
     if (leaseStartInput) leaseStartInput.disabled = false;
     if (leaseExpirationInput) leaseExpirationInput.disabled = false;
+    if (ownerInput) {
+        ownerInput.value = "";
+        ownerInput.disabled = false;
+    }
     // remove live listeners when resetting
     latitudeInput.oninput = null;
     longitudeInput.oninput = null;
@@ -2419,6 +2489,7 @@ function openRecordModal(mode, record) {
     const longitudeInput = document.getElementById("recordLongitude");
     const leaseStartInput = document.getElementById("recordLeaseStart");
     const leaseExpirationInput = document.getElementById("recordLeaseExpiration");
+    const ownerInput = document.getElementById("recordPlotOwner");
 
     activeRecordMode = mode;
     resetRecordForm();
@@ -2440,6 +2511,7 @@ function openRecordModal(mode, record) {
         longitudeInput.value = record.lng;
         if (leaseStartInput) leaseStartInput.value = record.lease_start_date || "";
         if (leaseExpirationInput) leaseExpirationInput.value = record.lease_expiration_date || "";
+        if (ownerInput) ownerInput.value = getPlotOwnerName(record) || "Not Assigned";
         updateNameFieldRequirement(record.status);
         // live update the admin map when coordinates are changed in the form
         editingRecordId = record.id;
@@ -2459,6 +2531,7 @@ function openRecordModal(mode, record) {
         longitudeInput.value = record.lng;
         if (leaseStartInput) leaseStartInput.value = record.lease_start_date || "";
         if (leaseExpirationInput) leaseExpirationInput.value = record.lease_expiration_date || "";
+        if (ownerInput) ownerInput.value = getPlotOwnerName(record) || "Not Assigned";
 
         nameInput.disabled = true;
         blockInput.disabled = true;
@@ -2470,6 +2543,7 @@ function openRecordModal(mode, record) {
         longitudeInput.disabled = true;
         if (leaseStartInput) leaseStartInput.disabled = true;
         if (leaseExpirationInput) leaseExpirationInput.disabled = true;
+        if (ownerInput) ownerInput.disabled = true;
     }
 
     toggleAddRecordModal(true);

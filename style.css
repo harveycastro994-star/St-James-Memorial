@@ -902,6 +902,29 @@ RESPONSIVE
     color:#64748b;
 }
 
+/* ==========================================
+   PLOT OWNER COLUMN (Burial Records)
+   The owner is read from profiles.assigned_record_id -> burial_records.id,
+   never typed into the burial record itself.
+========================================== */
+
+.owner-cell{
+    font-weight:500;
+    color:#14532D;
+}
+
+.owner-none{
+    color:#94A3B8;
+    font-weight:400;
+}
+
+/* Plot Owner is owned by the visitor account, so it is read-only here. */
+.record-form input[readonly]{
+    background:#f1f5f9;
+    color:#475569;
+    cursor:not-allowed;
+}
+
 .table-action-btn{
     border:none;
     border-radius:8px;
@@ -952,6 +975,20 @@ RESPONSIVE
 
 .table-action-btn.delete-btn:hover{
     background:#fecaca;
+}
+
+/* "Send Reminder" / "Resend Reminder" on the admin Lease Renewal table.
+   Solid green with white text, matching the Reserve buttons, so the action is
+   obvious and the label stays readable (.table-action-btn on its own is only a
+   pale green with no contrast against the row). */
+.table-action-btn[data-action="send-lease-reminder"]{
+    background:#15803D;
+    color:#ffffff;
+    font-weight:500;
+}
+
+.table-action-btn[data-action="send-lease-reminder"]:hover{
+    background:#166534;
 }
 
 .notification-section {
