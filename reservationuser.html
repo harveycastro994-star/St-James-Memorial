@@ -269,7 +269,7 @@ GIS-Based Burial Site Mapping and Record Management System
 <h4>Applicant Information</h4>
 <label>Full Name<input type="text" id="applicationApplicantFullName" required></label>
 <label>Email<input type="email" id="applicationApplicantEmail" required></label>
-<label>Contact Number<input type="tel" id="applicationApplicantContactNumber" required></label>
+<label>Contact Number<input type="tel" id="applicationApplicantContactNumber" required inputmode="numeric" maxlength="11" minlength="11" pattern="[0-9]{11}" placeholder="09XXXXXXXXX" autocomplete="tel" title="Enter exactly 11 digits, for example 09171234567"></label>
 <h4>Deceased Information</h4>
 <label>Full Name<input type="text" id="applicationDeceasedFullName" required></label>
 <label>Date of Birth<input type="date" id="applicationDeceasedDateOfBirth" required></label>

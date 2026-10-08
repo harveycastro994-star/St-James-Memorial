@@ -2146,9 +2146,47 @@ function closeReservationApplicationModal() {
     document.getElementById("reservationApplicationModal")?.classList.add("hidden");
 }
 
+/* -------------------------------------------------------------------------
+   RESERVATION CONTACT NUMBER - EXACTLY 11 DIGITS
+   -------------------------------------------------------------------------
+   A Philippine mobile number is 11 digits (09XXXXXXXXX). The same rule is
+   declared on the input itself in reservationuser.html
+   (inputmode + maxlength + pattern), so the browser and this check agree and
+   the form cannot be submitted with 10 or 12 digits.
+   ------------------------------------------------------------------------- */
+const CONTACT_NUMBER_PATTERN = /^[0-9]{11}$/;
+
+/* Keeps only digits, and never more than 11 of them. */
+function normalizeContactNumber(value) {
+    return String(value || "").replace(/\D/g, "").slice(0, 11);
+}
+
+function isValidContactNumber(value) {
+    return CONTACT_NUMBER_PATTERN.test(String(value || ""));
+}
+
 async function submitReservationApplication(event) {
     event.preventDefault();
     const form = event.target;
+
+    /* The contact number is cleaned and checked BEFORE the browser's own
+       validation, and the order matters: a pasted "0917-123-4567" still holds
+       its dashes, so form.checkValidity() would reject it with a generic
+       "Please match the requested format" bubble and the message below would
+       never be reached. Cleaning first turns it into 11 digits. */
+    const contactField = document.getElementById("applicationApplicantContactNumber");
+
+    if (contactField) {
+        // digits only: removes spaces, dashes and a "+63" prefix
+        contactField.value = normalizeContactNumber(contactField.value);
+
+        if (!isValidContactNumber(contactField.value)) {
+            alert("Contact number must be exactly 11 digits (for example 09171234567).");
+            contactField.focus();
+            return;
+        }
+    }
+
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
@@ -2332,6 +2370,28 @@ function initializeUserReservations() {
     applicationForm?.addEventListener("submit", submitReservationApplication);
     closeApplicationButton?.addEventListener("click", closeReservationApplicationModal);
     cancelApplicationButton?.addEventListener("click", closeReservationApplicationModal);
+
+    /* Contact number: digits only, never more than 11, cleaned while typing so
+       a letter, a space or a dash can never reach the form. */
+    const contactInput = document.getElementById("applicationApplicantContactNumber");
+    contactInput?.addEventListener("input", () => {
+        const digits = normalizeContactNumber(contactInput.value);
+        if (contactInput.value !== digits) {
+            contactInput.value = digits;
+        }
+    });
+
+    /* Pasting "0917-123-4567" would be cut to "0917-123-45" by maxlength before
+       the handler above can clean it, so the paste is taken over here. */
+    contactInput?.addEventListener("paste", (event) => {
+        const clipboard = event.clipboardData || window.clipboardData;
+        const pasted = clipboard ? clipboard.getData("text") : "";
+
+        if (/\D/.test(pasted)) {
+            event.preventDefault();
+            contactInput.value = normalizeContactNumber(pasted);
+        }
+    });
 
     if (searchInput) {
         searchInput.addEventListener("input", (event) => filterReservationRows("reservationUserTableBody", event.target.value));
