@@ -2567,6 +2567,11 @@ function openRecordModal(mode, record) {
         plotInput.value = record.plot;
         dateInput.value = normalizeDateValue(record.date);
         statusInput.value = record.status;
+        /* Carry the SAVED condition into the form. Without this the value left
+           behind by resetRecordForm() ("Clean") would be written back over a
+           "Dirty" plot, and handleAddBurialRecord() would then see a change
+           and log a false "Dirty -> Clean" notification for the visitor. */
+        cleanlinessInput.value = record.cleanliness || "Clean";
         latitudeInput.value = record.lat;
         longitudeInput.value = record.lng;
         if (leaseStartInput) leaseStartInput.value = record.lease_start_date || "";
@@ -2737,7 +2742,9 @@ async function handleAddBurialRecord(event) {
     if (recordId) {
         const existingRecord = burialRecords.find((item) => item.id === recordId);
         if (existingRecord) {
-            const oldCondition = existingRecord.cleanliness;
+            /* The same fallback the form uses, so a row with no stored condition
+               cannot look like a change either. */
+            const oldCondition = existingRecord.cleanliness || "Clean";
             existingRecord.name = status === "Available" ? "" : name;
             existingRecord.block = block;
             existingRecord.plot = plot;
