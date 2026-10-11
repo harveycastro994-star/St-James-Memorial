@@ -1110,12 +1110,35 @@ function createStatusIcon(status) {
     });
 }
 
+/* Builds the HTML shown inside a marker's popup.
+
+   The visitor map gets an extra "Reserve This Plot" button on every Available
+   plot: it carries the plot's id to the reservations page, which opens the
+   application form for that exact plot. The admin map never shows it, because
+   an administrator reserves plots from the reservations table instead. */
+function buildMarkerPopupContent(record, isVisitorMap) {
+    const title = escapeHtml(getDisplayName(record) || "Available Plot");
+    const block = escapeHtml(record.block || "");
+    const plot = escapeHtml(record.plot === undefined || record.plot === null ? "" : record.plot);
+    const status = escapeHtml(record.status || "");
+
+    let html = `<strong>${title}</strong><br>${block} • Plot ${plot}<br>Status: ${status}`;
+
+    if (isVisitorMap && record.status === "Available") {
+        html += `<br><a class="map-reserve-btn" href="reservationuser.html?reserve=${encodeURIComponent(record.id)}"><i class="fa-solid fa-bookmark"></i> Reserve This Plot</a>`;
+    }
+
+    return html;
+}
+
 function renderBurialMarkers(map, layerGroup, records) {
     if (!map || !layerGroup) {
         return;
     }
 
     layerGroup.clearLayers();
+
+    const isVisitorMap = map === cemeteryMap;
 
     records.forEach((record) => {
         if (record.lat === undefined || record.lng === undefined) {
@@ -1125,7 +1148,7 @@ function renderBurialMarkers(map, layerGroup, records) {
         const icon = createStatusIcon(record.status);
         const marker = L.marker([record.lat, record.lng], { icon: icon }).addTo(layerGroup);
 
-        marker.bindPopup(`<strong>${record.name}</strong><br>${record.block} • Plot ${record.plot}<br>Status: ${record.status}`);
+        marker.bindPopup(buildMarkerPopupContent(record, isVisitorMap));
         marker.on("click", () => {
             if (map === cemeteryMap) {
                 updateBurialDetails(record);
@@ -2073,7 +2096,7 @@ function renderUserReservations() {
                     </button>`;
 
             return `
-            <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}">
+            <tr data-name="${record.name}" data-block="${record.block}" data-plot="${record.plot}" data-record-id="${record.id}">
                 <td>${record.id}</td>
                 <td>${getDisplayName(record)}</td>
                 <td>${record.block.replace("Block ", "")}</td>
@@ -2353,6 +2376,55 @@ function filterReservationRows(tableBodyId, query) {
     });
 }
 
+/* Deep link from the visitor map.
+
+   The "Reserve This Plot" button in a marker popup points at
+   reservationuser.html?reserve=<record id>. Landing here, this opens the
+   application form for that exact plot (and scrolls its row into view) instead
+   of leaving the visitor to find the plot again in the table. */
+function openReservationFromUrl() {
+    const recordId = new URLSearchParams(window.location.search).get("reserve");
+
+    if (!recordId) {
+        return;
+    }
+
+    /* Drop the parameter straight away so an accidental refresh, or coming back
+       to the page later, does not pop the modal open again. */
+    if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+    }
+
+    const row = document.querySelector(`#reservationUserTableBody tr[data-record-id="${recordId}"]`);
+
+    if (row) {
+        row.classList.add("table-row-highlight");
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    const record = burialRecords.find((item) => item.id === recordId);
+
+    if (!record) {
+        alert("That plot could not be found.");
+        return;
+    }
+
+    if (record.status !== "Available") {
+        alert("This plot is no longer available for reservation.");
+        return;
+    }
+
+    /* The table hides the Reserve button once an application exists, so the deep
+       link must respect that too - otherwise a duplicate application could be
+       filed for the same plot. */
+    if (getOpenApplication(recordId)) {
+        alert("You already have an application for this plot.");
+        return;
+    }
+
+    openReservationApplicationModal(recordId);
+}
+
 function initializeUserReservations() {
     const body = document.getElementById("reservationUserPage");
     if (!body) {
@@ -2366,6 +2438,7 @@ function initializeUserReservations() {
     const cancelApplicationButton = document.getElementById("cancelReservationApplicationBtn");
 
     renderUserReservations();
+    openReservationFromUrl();
 
     applicationForm?.addEventListener("submit", submitReservationApplication);
     closeApplicationButton?.addEventListener("click", closeReservationApplicationModal);

@@ -991,6 +991,28 @@ RESPONSIVE
     background:#166534;
 }
 
+/* The "Reserve This Plot" button inside a visitor map popup. A Leaflet popup is
+   plain HTML, so this is an <a> styled to match the table's Reserve button. */
+.map-reserve-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    margin-top:8px;
+    padding:7px 12px;
+    border-radius:8px;
+    background:#15803D;
+    color:#ffffff;
+    font-weight:500;
+    font-size:13px;
+    text-decoration:none;
+    white-space:nowrap;
+}
+
+.map-reserve-btn:hover{
+    background:#166534;
+    color:#ffffff;
+}
+
 .notification-section {
     margin: 20px 0;
 }
