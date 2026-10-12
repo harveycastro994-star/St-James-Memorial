@@ -1084,6 +1084,10 @@ function createCemeteryLocationIcon() {
     });
 }
 
+/* One marker per plot, so the dot is kept small (14px) - at 24px the circles
+   overlapped each other on the satellite view and hid the map underneath. */
+const PLOT_MARKER_SIZE = 14;
+
 function createStatusIcon(status) {
     let color = "#94A3B8"; // Default gray
     
@@ -1097,16 +1101,16 @@ function createStatusIcon(status) {
     
     return L.divIcon({
         html: `<div style="
-            width: 24px;
-            height: 24px;
+            width: ${PLOT_MARKER_SIZE}px;
+            height: ${PLOT_MARKER_SIZE}px;
             border-radius: 50%;
             background: ${color};
-            border: 3px solid #fff;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            border: 2px solid #fff;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
         "></div>`,
         className: "",
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
+        iconSize: [PLOT_MARKER_SIZE, PLOT_MARKER_SIZE],
+        iconAnchor: [PLOT_MARKER_SIZE / 2, PLOT_MARKER_SIZE / 2]
     });
 }
 
@@ -1285,11 +1289,13 @@ function initializeMap() {
 
     cemeteryMap = L.map("map", {
         zoomControl: true
-    }).setView([14.8829944, 120.8613913], 20);
+    }).setView([14.8829944, 120.8613913], 18);
 
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    /* Esri World Imagery (satellite) instead of the OpenStreetMap street tiles,
+       so the plot markers sit on top of the real cemetery ground. */
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors'
+        attribution: "Tiles © Esri and its imagery providers"
     }).addTo(cemeteryMap);
 
     cemeteryMarkersLayer = L.layerGroup().addTo(cemeteryMap);
@@ -1300,7 +1306,7 @@ function initializeMap() {
 
     setTimeout(() => {
         cemeteryMap.invalidateSize();
-        cemeteryMap.setView(PLARIDEL_CEMETERY_COORDINATES, 20);
+        cemeteryMap.setView(PLARIDEL_CEMETERY_COORDINATES, 18);
     }, 200);
 
     renderMapMarkers();
@@ -1347,7 +1353,7 @@ function initializeMap() {
 
                     // Center only on the first successful fix; later updates must not move the map.
                     if (!userGpsHasCentered) {
-                        cemeteryMap.setView(coordinates, 20);
+                        cemeteryMap.setView(coordinates, 18);
                         userGpsHasCentered = true;
                     }
 
@@ -1398,11 +1404,13 @@ function initializeAdminMap() {
 
     adminMap = L.map("adminMap", {
         zoomControl: true
-    }).setView([14.8829944, 120.8613913], 20);
+    }).setView([14.8829944, 120.8613913], 18);
 
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    /* Same Esri World Imagery layer as the visitor map, so plots are plotted on
+       the satellite view an administrator sees here too. */
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors'
+        attribution: "Tiles © Esri and its imagery providers"
     }).addTo(adminMap);
 
     adminMarkersLayer = L.layerGroup().addTo(adminMap);
@@ -1416,7 +1424,7 @@ function initializeAdminMap() {
 
     setTimeout(() => {
         adminMap.invalidateSize();
-        adminMap.setView(PLARIDEL_CEMETERY_COORDINATES, 20);
+        adminMap.setView(PLARIDEL_CEMETERY_COORDINATES, 18);
     }, 200);
 
     renderMapMarkers();
@@ -1482,7 +1490,7 @@ function initializeAdminMap() {
 
                     // Center only on the first successful fix; later updates must not move the map.
                     if (!adminGpsHasCentered) {
-                        adminMap.setView(coordinates, 20);
+                        adminMap.setView(coordinates, 18);
                         adminGpsHasCentered = true;
                     }
 
