@@ -142,6 +142,13 @@ const LEASE_REMINDER = {
     MANUAL:   "Manual Reminder"
 };
 
+/* What happens to the plot when the lease is not renewed in time. Attached to
+   the reminder an administrator sends by hand, so the plot owner is told the
+   consequence, not just the deadline. */
+const LEASE_LAPSE_CONSEQUENCE =
+    "Failure to renew the lease within the specified period may result in the temporary " +
+    "exhumation and transfer of the remains, subject to cemetery policies and applicable laws.";
+
 /* Rows from public.lease_reminders. The database already restricts these to
    the signed-in user, so a visitor only ever receives their own. */
 let leaseReminders = [];
@@ -517,17 +524,21 @@ function daysRemainingText(days) {
     return days + " day" + (days === 1 ? "" : "s");
 }
 
-/* The wording the visitor reads, and that is stored with the reminder. */
+/* The wording the visitor reads, and that is stored with the reminder. The
+   reminder an administrator sends by hand also states the consequence of
+   letting the lease lapse (see LEASE_LAPSE_CONSEQUENCE). */
 function buildLeaseReminderMessage(record, reminderType) {
     const days = daysUntil(record.lease_expiration_date);
     const expires = formatDisplayDate(record.lease_expiration_date);
     const where = record.block + ", Plot " + record.plot;
 
-    if (reminderType === LEASE_REMINDER.EXPIRED || days <= 0) {
-        return `Your cemetery plot lease for ${where} expired on ${expires}. Please contact the cemetery administration for lease renewal.`;
-    }
+    const message = (reminderType === LEASE_REMINDER.EXPIRED || days <= 0)
+        ? `Your cemetery plot lease for ${where} expired on ${expires}. Please contact the cemetery administration for lease renewal.`
+        : `Your cemetery plot lease for ${where} will expire on ${expires} (${days} day${days === 1 ? "" : "s"} remaining). Please contact the cemetery administration for lease renewal.`;
 
-    return `Your cemetery plot lease for ${where} will expire on ${expires} (${days} day${days === 1 ? "" : "s"} remaining). Please contact the cemetery administration for lease renewal.`;
+    return reminderType === LEASE_REMINDER.MANUAL
+        ? `${message} ${LEASE_LAPSE_CONSEQUENCE}`
+        : message;
 }
 
 async function loadLeaseRemindersFromSupabase() {
