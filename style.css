@@ -90,10 +90,73 @@ LEFT PANEL
 }
 
 .description p{
+
     width:80%;
+
     line-height:1.9;
+
     font-size:16px;
+
     opacity:.9;
+
+}
+
+/* ===========================
+CONTACT INFO
+=========================== */
+
+.contact-info{
+
+    margin-top:40px;
+
+}
+
+.contact-info h3{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:10px;
+
+    font-size:18px;
+
+    font-weight:600;
+
+    color:#C9A227;
+
+    margin-bottom:14px;
+
+}
+
+.contact-info p{
+
+    display:flex;
+
+    align-items:flex-start;
+
+    gap:10px;
+
+    font-size:14px;
+
+    line-height:1.7;
+
+    opacity:.9;
+
+}
+
+.contact-info p + p{
+
+    margin-top:10px;
+
+}
+
+.contact-info p i{
+
+    margin-top:4px;
+
+    flex-shrink:0;
+
 }
 
 /* ===========================
@@ -337,6 +400,20 @@ RESPONSIVE
 
 }
 
+.contact-info{
+
+    margin-top:24px;
+
+}
+
+.contact-info h3,
+
+.contact-info p{
+
+    justify-content:center;
+
+}
+
 .right-panel{
 
     width:100%;
@@ -352,6 +429,40 @@ RESPONSIVE
 }
 
 } 
+
+/* Short desktop windows: trim vertical spacing so the left panel content
+   (logo, welcome text and contact details) still fits without being clipped,
+   since the login page body does not scroll on desktop. */
+
+@media(min-width:901px) and (max-height:760px){
+
+.left-panel{
+
+    padding:40px 70px;
+
+}
+
+.logo i{
+
+    font-size:52px;
+
+    margin-bottom:8px;
+
+}
+
+.description{
+
+    margin-top:30px;
+
+}
+
+.contact-info{
+
+    margin-top:24px;
+
+}
+
+}
 
 /* ==========================================
    ADMIN DASHBOARD
