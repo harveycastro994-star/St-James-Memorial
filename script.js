@@ -142,13 +142,6 @@ const LEASE_REMINDER = {
     MANUAL:   "Manual Reminder"
 };
 
-/* What happens to the plot when the lease is not renewed in time. Attached to
-   the reminder an administrator sends by hand, so the plot owner is told the
-   consequence, not just the deadline. */
-const LEASE_LAPSE_CONSEQUENCE =
-    "Failure to renew the lease within the specified period may result in the temporary " +
-    "exhumation and transfer of the remains, subject to cemetery policies and applicable laws.";
-
 /* Rows from public.lease_reminders. The database already restricts these to
    the signed-in user, so a visitor only ever receives their own. */
 let leaseReminders = [];
@@ -524,21 +517,31 @@ function daysRemainingText(days) {
     return days + " day" + (days === 1 ? "" : "s");
 }
 
-/* The wording the visitor reads, and that is stored with the reminder. The
-   reminder an administrator sends by hand also states the consequence of
-   letting the lease lapse (see LEASE_LAPSE_CONSEQUENCE). */
+/* The wording the visitor reads, and that is stored with the reminder. */
 function buildLeaseReminderMessage(record, reminderType) {
     const days = daysUntil(record.lease_expiration_date);
     const expires = formatDisplayDate(record.lease_expiration_date);
     const where = record.block + ", Plot " + record.plot;
 
-    const message = (reminderType === LEASE_REMINDER.EXPIRED || days <= 0)
-        ? `Your cemetery plot lease for ${where} expired on ${expires}. Please contact the cemetery administration for lease renewal.`
-        : `Your cemetery plot lease for ${where} will expire on ${expires} (${days} day${days === 1 ? "" : "s"} remaining). Please contact the cemetery administration for lease renewal.`;
+    if (reminderType === LEASE_REMINDER.EXPIRED || days <= 0) {
+        return `Your cemetery plot lease for ${where} expired on ${expires}. Please contact the cemetery administration for lease renewal.`;
+    }
 
-    return reminderType === LEASE_REMINDER.MANUAL
-        ? `${message} ${LEASE_LAPSE_CONSEQUENCE}`
-        : message;
+    return `Your cemetery plot lease for ${where} will expire on ${expires} (${days} day${days === 1 ? "" : "s"} remaining). Please contact the cemetery administration for lease renewal.`;
+}
+
+/* Added to every reminder an administrator sends by hand ("Send Reminder").
+   It is NOT added to the automatic reminder the system writes when a visitor
+   signs in, because saveLeaseReminder() only uses it when sent_by is set. */
+const LEASE_LAPSE_CONSEQUENCE =
+    "Failure to renew the lease within the specified period may result in the " +
+    "temporary exhumation and transfer of the remains, subject to cemetery " +
+    "policies and applicable laws.";
+
+/* The administrator's version of the wording: the normal reminder plus the
+   consequence of not renewing. */
+function buildManualLeaseReminderMessage(record, reminderType) {
+    return buildLeaseReminderMessage(record, reminderType) + " " + LEASE_LAPSE_CONSEQUENCE;
 }
 
 async function loadLeaseRemindersFromSupabase() {
@@ -659,7 +662,12 @@ async function saveLeaseReminder({ record, reminderType, recipientProfileId, sen
             record_id: record.id,
             recipient_profile_id: recipientProfileId,
             reminder_type: reminderType,
-            message: buildLeaseReminderMessage(record, reminderType),
+            /* sent_by is null for the automatic reminder and holds the admin's
+               profile id for "Send Reminder", so the lease-lapse consequence
+               only appears in the reminder an administrator actually sends. */
+            message: sentBy
+                ? buildManualLeaseReminderMessage(record, reminderType)
+                : buildLeaseReminderMessage(record, reminderType),
             lease_expiration_date: record.lease_expiration_date,
             sent_by: sentBy
         })
@@ -2032,6 +2040,881 @@ function renderBurialRecordsTable() {
     updateDashboardStats();
 }
 
+/* =========================================================================
+   BURIAL RECORDS - CSV IMPORT / EXPORT
+   -------------------------------------------------------------------------
+   The data lives in public.burial_records and the columns below are exactly
+   the ones the rest of this file reads and writes. This database has NO
+   "notes" column, so a CSV column called "notes" is reported as ignored
+   instead of being invented.
+
+   Excel turns "001" into 1 and "023" into 23 when it opens a plain CSV, so
+   the identifier columns are written as ="001". readCsvCell() removes that
+   wrapper again on import, which means an exported file can be imported back
+   without changing anything.
+   ========================================================================= */
+
+const BURIAL_CSV_COLUMNS = [
+    { header: "Record ID",             column: "id",                    excelText: true  },
+    { header: "Deceased Name",         column: "name",                  excelText: false },
+    { header: "Block",                 column: "block",                 excelText: true  },
+    { header: "Plot",                  column: "plot",                  excelText: true  },
+    { header: "Date of Burial",        column: "date",                  excelText: false },
+    { header: "Status",                column: "status",                excelText: false },
+    { header: "Grave Condition",       column: "cleanliness",           excelText: false },
+    { header: "Latitude",              column: "lat",                   excelText: false },
+    { header: "Longitude",             column: "lng",                   excelText: false },
+    { header: "Lease Start Date",      column: "lease_start_date",      excelText: false },
+    { header: "Lease Expiration Date", column: "lease_expiration_date", excelText: false }
+];
+
+/* Accepted header spellings -> database column. The friendly headers the
+   export writes are included, so an exported file imports again unchanged. */
+const BURIAL_CSV_ALIASES = {
+    "record id": "id",
+    "recordid": "id",
+    "record": "id",
+    "record no": "id",
+    "id": "id",
+    "deceased name": "name",
+    "deceased": "name",
+    "name": "name",
+    "full name": "name",
+    "block": "block",
+    "block no": "block",
+    "block number": "block",
+    "plot": "plot",
+    "plot no": "plot",
+    "plot number": "plot",
+    "date of burial": "date",
+    "burial date": "date",
+    "date": "date",
+    "status": "status",
+    "grave condition": "cleanliness",
+    "grave cleanliness": "cleanliness",
+    "condition": "cleanliness",
+    "cleanliness": "cleanliness",
+    "latitude": "lat",
+    "lat": "lat",
+    "longitude": "lng",
+    "long": "lng",
+    "lon": "lng",
+    "lng": "lng",
+    "lease start date": "lease_start_date",
+    "lease start": "lease_start_date",
+    "lease expiration date": "lease_expiration_date",
+    "lease expiry date": "lease_expiration_date",
+    "lease expiration": "lease_expiration_date",
+    "lease expiry": "lease_expiration_date"
+};
+
+const BURIAL_CSV_MAX_BYTES = 2 * 1024 * 1024;   // 2 MB is far more than this cemetery needs
+const CSV_PREVIEW_LIMIT = 20;                   // rows shown in the preview modal
+
+let pendingCsvImport = null;    // { fileName, results, valid, invalid, ignoredHeaders }
+let lastCsvFailures = [];       // rows that could not be imported, for the error report
+let csvImportFinished = false;  // true once the "Import" button became "Done"
+
+/* "Lease_Start_Date", "lease start date" and "LEASE-START-DATE" all become
+   "lease start date", so the same file works whatever headers it has. */
+function normalizeCsvHeader(value) {
+    return String(value === null || value === undefined ? "" : value)
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .toLowerCase()
+        .replace(/[_\-./]+/g, " ")
+        .replace(/[^a-z0-9 ]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function resolveCsvColumn(header) {
+    return BURIAL_CSV_ALIASES[normalizeCsvHeader(header)] || null;
+}
+
+/* RFC 4180 reader: handles quoted fields, doubled quotes (""), commas and
+   line breaks inside quotes, CRLF and a UTF-8 BOM written by Excel. */
+function parseCsvText(text) {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuotes = false;
+    let index = 0;
+    const source = String(text === null || text === undefined ? "" : text).replace(/^\uFEFF/, "");
+
+    while (index < source.length) {
+        const char = source[index];
+
+        if (inQuotes) {
+            if (char === '"') {
+                if (source[index + 1] === '"') {
+                    field += '"';
+                    index += 2;
+                    continue;
+                }
+                inQuotes = false;
+                index += 1;
+                continue;
+            }
+            field += char;
+            index += 1;
+            continue;
+        }
+
+        /* A quote only OPENS a quoted field when it is the first character of
+           that field, otherwise ="001" would lose its quotation marks. */
+        if (char === '"' && field === "") {
+            inQuotes = true;
+            index += 1;
+            continue;
+        }
+
+        if (char === ",") {
+            row.push(field);
+            field = "";
+            index += 1;
+            continue;
+        }
+
+        if (char === "\r" || char === "\n") {
+            row.push(field);
+            rows.push(row);
+            row = [];
+            field = "";
+            index += (char === "\r" && source[index + 1] === "\n") ? 2 : 1;
+            continue;
+        }
+
+        field += char;
+        index += 1;
+    }
+
+    row.push(field);
+    rows.push(row);
+
+    /* drop the empty row a trailing newline creates */
+    return rows.filter((cells) => cells.some((cell) => String(cell).trim() !== ""));
+}
+
+/* Reads one cell: trims it and undoes the ="..." text wrapper. */
+function readCsvCell(value) {
+    let text = String(value === null || value === undefined ? "" : value).trim();
+    const wrapped = text.match(/^=\s*"([\s\S]*)"$/);
+
+    if (wrapped) {
+        text = wrapped[1].replace(/""/g, '"').trim();
+    }
+
+    return text;
+}
+
+/* Writes one CSV cell. asExcelText keeps leading zeros safe in Excel. */
+function csvField(value, asExcelText) {
+    const text = String(value === null || value === undefined ? "" : value);
+
+    if (asExcelText && text !== "" && !/[",\r\n]/.test(text)) {
+        return '="' + text + '"';
+    }
+
+    return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+}
+
+/* YYYY-MM-DD from local calendar parts - never toISOString(), which would
+   shift a +08:00 date to the previous day. */
+function toIsoDate(year, month, day) {
+    const date = new Date(year, month - 1, day);
+
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+        return "";   // 2025-02-30 and similar
+    }
+
+    const pad = (number) => String(number).padStart(2, "0");
+    return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+function parseCsvDate(value) {
+    const text = readCsvCell(value);
+
+    if (!text) {
+        return "";
+    }
+
+    let match = text.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+    if (match) {
+        return toIsoDate(Number(match[1]), Number(match[2]), Number(match[3]));
+    }
+
+    match = text.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/);
+    if (match) {
+        return toIsoDate(Number(match[3]), Number(match[1]), Number(match[2]));
+    }
+
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.getTime())) {
+        return toIsoDate(parsed.getFullYear(), parsed.getMonth() + 1, parsed.getDate());
+    }
+
+    return "";
+}
+
+function normalizeCsvStatus(value) {
+    const text = readCsvCell(value).toLowerCase();
+
+    if (text === "occupied") return "Occupied";
+    if (text === "reserved") return "Reserved";
+    if (text === "available") return "Available";
+    return "";
+}
+
+function normalizeCsvCleanliness(value) {
+    const text = readCsvCell(value).toLowerCase();
+
+    if (text === "clean") return "Clean";
+    if (text === "dirty") return "Dirty";
+    return "";
+}
+
+/* Matches the database rule UNIQUE (block, plot). */
+function canonicalPlotKey(block, plot) {
+    return String(block || "").trim().toLowerCase() + "|" + String(plot || "").trim().toLowerCase();
+}
+
+/* Validates one CSV row without touching the database. */
+function validateCsvRow(values, rowNumber, context) {
+    const problems = [];
+    const warnings = [];
+
+    const rawId = readCsvCell(values.id);
+    const name = readCsvCell(values.name);
+    const blockText = readCsvCell(values.block);
+    const plotText = readCsvCell(values.plot);
+    const dateText = readCsvCell(values.date);
+
+    /* block and plot are normalised the same way the Add Record form does */
+    const block = normalizeBlock(blockText);
+    const plot = normalizePlot(plotText);
+
+    if (!blockText) problems.push("Block is required.");
+    if (!plotText) problems.push("Plot is required.");
+
+    let status = normalizeCsvStatus(values.status);
+
+    if (!readCsvCell(values.status)) {
+        status = name ? "Occupied" : "Available";
+        warnings.push(`Status was empty, so "${status}" was used.`);
+    } else if (!status) {
+        problems.push("Status must be Occupied, Reserved or Available.");
+    }
+
+    if (status !== "Available" && !name) {
+        problems.push("Deceased name is required when the status is not Available.");
+    }
+
+    const date = parseCsvDate(dateText);
+    if (!dateText) {
+        problems.push("Date of burial is required.");
+    } else if (!date) {
+        problems.push(`Date of burial "${dateText}" is not a valid date.`);
+    }
+
+    let cleanliness = normalizeCsvCleanliness(values.cleanliness);
+
+    if (!readCsvCell(values.cleanliness)) {
+        cleanliness = "Clean";
+        warnings.push('Grave condition was empty, so "Clean" was used.');
+    } else if (!cleanliness) {
+        problems.push("Grave condition must be Clean or Dirty.");
+    }
+
+    /* coordinates fall back to the cemetery centre, never to a made-up point */
+    let latitude = PLARIDEL_CEMETERY_COORDINATES[0];
+    let longitude = PLARIDEL_CEMETERY_COORDINATES[1];
+    const latitudeText = readCsvCell(values.lat);
+    const longitudeText = readCsvCell(values.lng);
+
+    if (!latitudeText || !longitudeText) {
+        warnings.push("Coordinates were missing, so the cemetery centre was used.");
+    } else {
+        const latitudeValue = Number(latitudeText);
+        const longitudeValue = Number(longitudeText);
+
+        if (!isValidLatitude(latitudeValue)) {
+            problems.push(`Latitude "${latitudeText}" must be a number from -90 to 90.`);
+        } else if (!isValidLongitude(longitudeValue)) {
+            problems.push(`Longitude "${longitudeText}" must be a number from -180 to 180.`);
+        } else {
+            latitude = latitudeValue;
+            longitude = longitudeValue;
+        }
+    }
+
+    const leaseStartText = readCsvCell(values.lease_start_date);
+    const leaseExpirationText = readCsvCell(values.lease_expiration_date);
+    const leaseStart = leaseStartText ? parseCsvDate(leaseStartText) : "";
+    const leaseExpiration = leaseExpirationText ? parseCsvDate(leaseExpirationText) : "";
+
+    if (leaseStartText && !leaseStart) {
+        problems.push(`Lease start date "${leaseStartText}" is not a valid date.`);
+    }
+    if (leaseExpirationText && !leaseExpiration) {
+        problems.push(`Lease expiration date "${leaseExpirationText}" is not a valid date.`);
+    }
+    if (leaseStart && leaseExpiration && leaseExpiration < leaseStart) {
+        problems.push("Lease expiration date cannot be before the lease start date.");
+    }
+
+    /* duplicates: the table has UNIQUE (block, plot) and a text primary key */
+    if (rawId && context.existingIds.has(rawId)) {
+        problems.push(`Record ID ${rawId} already exists. Existing records are never overwritten.`);
+    }
+
+    if (block && plot) {
+        const key = canonicalPlotKey(block, plot);
+
+        if (context.existingKeys.has(key)) {
+            problems.push(`${block} / ${plot} already exists in the database.`);
+        } else if (context.seenKeys.has(key)) {
+            problems.push(`${block} / ${plot} appears more than once in this file.`);
+        } else {
+            context.seenKeys.add(key);
+        }
+    }
+
+    if (rawId) {
+        if (context.seenIds.has(rawId)) {
+            problems.push(`Record ID ${rawId} appears more than once in this file.`);
+        } else {
+            context.seenIds.add(rawId);
+        }
+    }
+
+    const record = {
+        name: status === "Available" ? "" : name,
+        block,
+        plot,
+        date,
+        status,
+        cleanliness,
+        lat: latitude,
+        lng: longitude,
+        lease_start_date: leaseStart || null,
+        lease_expiration_date: leaseExpiration || null
+    };
+
+    /* the id is optional: when it is empty the database trigger assigns one */
+    if (rawId) {
+        record.id = rawId;
+    }
+
+    return {
+        rowNumber,
+        display: {
+            id: rawId,
+            name,
+            block: block || blockText,
+            plot: plot || plotText,
+            date: date || dateText,
+            status: status || readCsvCell(values.status)
+        },
+        record,
+        problems,
+        warnings,
+        original: values
+    };
+}
+
+/* Every object in a bulk insert needs the same keys, so id is always present
+   (null means "let the assign_burial_record_id trigger choose"). */
+function csvRecordForInsert(item) {
+    return Object.assign({ id: null }, item.record);
+}
+
+function burialInsertErrorMessage(error) {
+    if (error.code === "23505") {
+        return "That block and plot already exist, or the record id is already used.";
+    }
+    if (error.code === "23514") {
+        return "A value is not allowed by the database rules.";
+    }
+    if (error.code === "22P02") {
+        return "A date or number could not be stored.";
+    }
+    return error.message || "The database rejected this row.";
+}
+
+function readFileAsText(file) {
+    if (typeof file.text === "function") {
+        return file.text();
+    }
+
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("The file could not be read."));
+        reader.readAsText(file);
+    });
+}
+
+function todayStamp() {
+    const now = new Date();
+    const pad = (number) => String(number).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function downloadFile(content, fileName, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function runWithBusyButton(button, busyText, task) {
+    const originalHtml = button.innerHTML;
+
+    button.disabled = true;
+    button.textContent = busyText;
+
+    return Promise.resolve()
+        .then(() => task())
+        .catch((error) => {
+            console.error("The operation failed:", error);
+            alert("The operation failed: " + error.message);
+        })
+        .finally(() => {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        });
+}
+
+/* -------------------------------------------------------------------------
+   IMPORT
+   ------------------------------------------------------------------------- */
+async function handleCsvFileSelected(event) {
+    const input = event.target;
+    const file = input.files && input.files[0];
+
+    if (!file) {
+        return;
+    }
+
+    const resetInput = () => { input.value = ""; };
+
+    if (file.size > BURIAL_CSV_MAX_BYTES) {
+        alert("That file is larger than 2 MB. Split it into smaller files and try again.");
+        resetInput();
+        return;
+    }
+
+    try {
+        const text = await readFileAsText(file);
+        const rows = parseCsvText(text);
+
+        if (rows.length < 2) {
+            alert("The CSV file is empty or has only a header row.");
+            resetInput();
+            return;
+        }
+
+        const headers = rows[0];
+        const columnForIndex = headers.map(resolveCsvColumn);
+        const ignoredHeaders = headers.filter((header, index) => !columnForIndex[index] && String(header).trim() !== "");
+
+        if (columnForIndex.indexOf("block") === -1
+            || columnForIndex.indexOf("plot") === -1
+            || columnForIndex.indexOf("date") === -1) {
+            alert(
+                "The CSV must contain Block, Plot and Date of Burial columns.\n\n" +
+                "Headers found: " + headers.join(", ") + "\n\n" +
+                "Tip: use Export CSV first to get a file with the correct headers."
+            );
+            resetInput();
+            return;
+        }
+
+        /* what the database already holds, so nothing is overwritten */
+        const context = {
+            existingIds: new Set(burialRecords.map((record) => String(record.id))),
+            existingKeys: new Set(burialRecords.map((record) => canonicalPlotKey(record.block, record.plot))),
+            seenKeys: new Set(),
+            seenIds: new Set()
+        };
+
+        const results = [];
+
+        for (let index = 1; index < rows.length; index += 1) {
+            const values = {};
+
+            columnForIndex.forEach((column, position) => {
+                if (column) {
+                    values[column] = rows[index][position];
+                }
+            });
+
+            /* +1 because the header is row 1 in the spreadsheet */
+            results.push(validateCsvRow(values, index + 1, context));
+        }
+
+        pendingCsvImport = {
+            fileName: file.name,
+            results,
+            valid: results.filter((item) => item.problems.length === 0),
+            invalid: results.filter((item) => item.problems.length > 0),
+            ignoredHeaders
+        };
+
+        csvImportFinished = false;
+        lastCsvFailures = [];
+
+        renderCsvImportPreview();
+        openCsvImportModal();
+    } catch (error) {
+        console.error("The CSV file could not be read:", error);
+        alert("The CSV file could not be read: " + error.message);
+    } finally {
+        resetInput();
+    }
+}
+
+function openCsvImportModal() {
+    const modal = document.getElementById("csvImportModal");
+
+    if (modal) {
+        modal.classList.remove("hidden");
+    }
+}
+
+function closeCsvImportModal() {
+    const modal = document.getElementById("csvImportModal");
+    const body = document.getElementById("csvImportPreviewBody");
+    const progress = document.getElementById("csvImportProgress");
+
+    if (modal) modal.classList.add("hidden");
+    if (body) body.innerHTML = "";
+    if (progress) progress.textContent = "";
+
+    pendingCsvImport = null;
+    lastCsvFailures = [];
+    csvImportFinished = false;
+}
+
+function renderCsvImportPreview() {
+    const body = document.getElementById("csvImportPreviewBody");
+    const summary = document.getElementById("csvImportSummary");
+    const progress = document.getElementById("csvImportProgress");
+    const confirmButton = document.getElementById("confirmCsvImportBtn");
+    const downloadButton = document.getElementById("downloadCsvErrorsBtn");
+
+    if (!body || !summary || !pendingCsvImport) {
+        return;
+    }
+
+    const { fileName, results, valid, invalid, ignoredHeaders } = pendingCsvImport;
+
+    let summaryText = `${fileName}: ${results.length} data row${results.length === 1 ? "" : "s"} found - `
+        + `${valid.length} ready to import, ${invalid.length} with a problem.`;
+
+    if (ignoredHeaders.length > 0) {
+        summaryText += ` Ignored column${ignoredHeaders.length === 1 ? "" : "s"} not in the database: ${ignoredHeaders.join(", ")}.`;
+    }
+
+    summary.textContent = summaryText;
+    summary.className = "csv-import-summary";
+
+    const visible = results.slice(0, CSV_PREVIEW_LIMIT);
+
+    body.innerHTML = visible.map((item) => {
+        const hasProblems = item.problems.length > 0;
+        const resultText = hasProblems
+            ? escapeHtml(item.problems.join(" "))
+            : escapeHtml(item.warnings.length > 0 ? "OK - " + item.warnings.join(" ") : "OK");
+
+        return `
+        <tr class="${hasProblems ? "row-invalid" : ""}">
+            <td>${item.rowNumber}</td>
+            <td>${escapeHtml(item.display.id)}</td>
+            <td>${escapeHtml(item.display.name)}</td>
+            <td>${escapeHtml(item.display.block)}</td>
+            <td>${escapeHtml(item.display.plot)}</td>
+            <td>${escapeHtml(item.display.date)}</td>
+            <td>${escapeHtml(item.display.status)}</td>
+            <td class="${hasProblems ? "row-result-error" : "row-result-ok"}">${resultText}</td>
+        </tr>
+        `;
+    }).join("");
+
+    if (results.length > visible.length) {
+        body.innerHTML += `
+        <tr>
+            <td colspan="8" class="empty-state">Showing the first ${visible.length} of ${results.length} rows - all ${results.length} are processed.</td>
+        </tr>
+        `;
+    }
+
+    if (progress) progress.textContent = "";
+
+    if (confirmButton) {
+        confirmButton.disabled = valid.length === 0;
+        confirmButton.textContent = valid.length > 0
+            ? `Import ${valid.length} record${valid.length === 1 ? "" : "s"}`
+            : "Nothing to import";
+    }
+
+    if (downloadButton) {
+        downloadButton.hidden = true;
+    }
+}
+
+async function runCsvImport() {
+    if (!pendingCsvImport || pendingCsvImport.valid.length === 0) {
+        return;
+    }
+
+    const confirmButton = document.getElementById("confirmCsvImportBtn");
+    const progress = document.getElementById("csvImportProgress");
+    const summary = document.getElementById("csvImportSummary");
+    const downloadButton = document.getElementById("downloadCsvErrorsBtn");
+
+    const validItems = pendingCsvImport.valid.slice();
+    const failures = pendingCsvImport.invalid.slice();
+    const rows = validItems.map(csvRecordForInsert);
+
+    if (confirmButton) {
+        confirmButton.disabled = true;
+        confirmButton.textContent = "Importing...";
+    }
+    if (progress) progress.textContent = `Saving ${rows.length} record${rows.length === 1 ? "" : "s"} to Supabase...`;
+    if (downloadButton) downloadButton.hidden = true;
+
+    let imported = 0;
+
+    try {
+        /* One request when every row is valid. If the database rejects the
+           batch (for example a duplicate created in the meantime) the rows are
+           retried one at a time so each failure is reported on its own row. */
+        const { error: batchError } = await supabaseClient
+            .from("burial_records")
+            .insert(rows);
+
+        if (!batchError) {
+            imported = rows.length;
+        } else if (batchError.code === "42501" || /permission/i.test(batchError.message || "")) {
+            if (progress) progress.textContent = "";
+            if (summary) {
+                summary.textContent = "The database refused the import: " + batchError.message
+                    + " Only an administrator may add burial records.";
+                summary.className = "csv-import-summary error-text";
+            }
+            if (confirmButton) {
+                confirmButton.disabled = false;
+                confirmButton.textContent = "Retry import";
+            }
+            return;
+        } else {
+            for (let index = 0; index < validItems.length; index += 1) {
+                const item = validItems[index];
+
+                if (progress) {
+                    progress.textContent = `Saving row ${index + 1} of ${rows.length} (file row ${item.rowNumber})...`;
+                }
+
+                const { error } = await supabaseClient
+                    .from("burial_records")
+                    .insert(csvRecordForInsert(item));
+
+                if (error) {
+                    failures.push(Object.assign({}, item, { problems: [burialInsertErrorMessage(error)] }));
+                } else {
+                    imported += 1;
+                }
+            }
+        }
+    } catch (error) {
+        console.error("The import stopped:", error);
+        if (progress) progress.textContent = "";
+        if (summary) {
+            summary.textContent = "The import stopped because of an error: " + error.message;
+            summary.className = "csv-import-summary error-text";
+        }
+        if (confirmButton) {
+            confirmButton.disabled = false;
+            confirmButton.textContent = "Retry import";
+        }
+        return;
+    }
+
+    lastCsvFailures = failures.filter((item) => item.problems.length > 0);
+    csvImportFinished = true;
+
+    if (progress) progress.textContent = "";
+
+    if (summary) {
+        const total = rows.length + pendingCsvImport.invalid.length;
+        summary.textContent = `Imported ${imported} of ${total} row${total === 1 ? "" : "s"}. `
+            + `${lastCsvFailures.length} row${lastCsvFailures.length === 1 ? "" : "s"} could not be imported.`;
+        summary.className = "csv-import-summary " + (lastCsvFailures.length === 0 ? "success-text" : "error-text");
+    }
+
+    if (downloadButton) {
+        downloadButton.hidden = lastCsvFailures.length === 0;
+    }
+
+    if (confirmButton) {
+        confirmButton.disabled = false;
+        confirmButton.textContent = "Done";
+    }
+
+    /* Show what the database now holds, not what the file said. */
+    burialRecords = await loadBurialRecords();
+    renderBurialRecordsTable();
+    renderMapMarkers();
+    renderRecentBurialActivity();
+    renderAdminLeaseReminders();
+}
+
+function downloadCsvFailures() {
+    if (lastCsvFailures.length === 0) {
+        return;
+    }
+
+    const lines = ["Row,Record ID,Deceased Name,Block,Plot,Problem"];
+
+    lastCsvFailures.forEach((item) => {
+        lines.push([
+            item.rowNumber,
+            item.display.id,
+            item.display.name,
+            item.display.block,
+            item.display.plot,
+            item.problems.join(" ")
+        ].map((value) => csvField(value, false)).join(","));
+    });
+
+    downloadFile(
+        "\uFEFF" + lines.join("\r\n") + "\r\n",
+        `burial_records_import_errors_${todayStamp()}.csv`,
+        "text/csv;charset=utf-8;"
+    );
+}
+
+/* -------------------------------------------------------------------------
+   EXPORT
+   ------------------------------------------------------------------------- */
+async function fetchBurialRecordsForExport() {
+    if (!supabaseClient) {
+        alert("Supabase is not available. Reload the page and try again.");
+        return null;
+    }
+
+    const records = await getBurialRecordsFromSupabase();
+
+    if (records === null) {
+        alert("The burial records could not be read from Supabase. Check your connection and try again.");
+        return null;
+    }
+
+    if (records.length === 0) {
+        alert("There are no burial records to export.");
+        return null;
+    }
+
+    /* the table behind the modal should match the file that was downloaded */
+    burialRecords = records;
+    renderBurialRecordsTable();
+    renderMapMarkers();
+
+    return records;
+}
+
+async function exportBurialRecordsToCsv() {
+    const records = await fetchBurialRecordsForExport();
+
+    if (!records) {
+        return;
+    }
+
+    const lines = [BURIAL_CSV_COLUMNS.map((column) => csvField(column.header, false)).join(",")];
+
+    records.forEach((record) => {
+        lines.push(BURIAL_CSV_COLUMNS.map((column) => {
+            const value = record[column.column];
+            return csvField(value === null || value === undefined ? "" : value, column.excelText);
+        }).join(","));
+    });
+
+    /* The BOM makes Excel read the file as UTF-8, so "ñ" and "é" survive.
+       Excel also opens this file directly - there is no separate .xlsx export,
+       because both would contain exactly the same records. */
+    const csv = "\uFEFF" + lines.join("\r\n") + "\r\n";
+
+    downloadFile(csv, `burial_records_${todayStamp()}.csv`, "text/csv;charset=utf-8;");
+}
+
+/* -------------------------------------------------------------------------
+   WIRING (only active on the Burial Records page)
+   ------------------------------------------------------------------------- */
+function initializeBurialCsvTools() {
+    const importButton = document.getElementById("importCsvBtn");
+    const fileInput = document.getElementById("burialCsvFileInput");
+    const exportCsvButton = document.getElementById("exportCsvBtn");
+    const confirmButton = document.getElementById("confirmCsvImportBtn");
+    const downloadButton = document.getElementById("downloadCsvErrorsBtn");
+    const closeButton = document.getElementById("closeCsvImportModal");
+    const cancelButton = document.getElementById("cancelCsvImportBtn");
+    const modal = document.getElementById("csvImportModal");
+
+    if (importButton && fileInput) {
+        importButton.addEventListener("click", () => fileInput.click());
+        fileInput.addEventListener("change", handleCsvFileSelected);
+    }
+
+    if (exportCsvButton) {
+        exportCsvButton.addEventListener("click", () => {
+            runWithBusyButton(exportCsvButton, "Exporting...", exportBurialRecordsToCsv);
+        });
+    }
+
+    if (confirmButton) {
+        confirmButton.addEventListener("click", () => {
+            if (csvImportFinished) {
+                closeCsvImportModal();
+                return;
+            }
+            runCsvImport();
+        });
+    }
+
+    if (downloadButton) {
+        downloadButton.addEventListener("click", downloadCsvFailures);
+    }
+    if (closeButton) {
+        closeButton.addEventListener("click", closeCsvImportModal);
+    }
+    if (cancelButton) {
+        cancelButton.addEventListener("click", closeCsvImportModal);
+    }
+
+    if (modal) {
+        modal.addEventListener("click", (event) => {
+            if (event.target === modal) {
+                closeCsvImportModal();
+            }
+        });
+
+        document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !modal.classList.contains("hidden")) {
+                closeCsvImportModal();
+            }
+        });
+    }
+}
+
 function getReservationCounts() {
     return {
         reserved: burialRecords.filter((record) => record.status === "Reserved").length,
@@ -2976,6 +3859,7 @@ function initializeAdminDashboard() {
     initializeAdminMap();
     updateDashboardStats();
     renderAdminLeaseReminders();
+    initializeBurialCsvTools();
 
     const openButton = document.getElementById("openAddRecordBtn");
     const closeButton = document.getElementById("closeAddRecordModal");

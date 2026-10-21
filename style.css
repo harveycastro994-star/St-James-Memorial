@@ -2377,3 +2377,114 @@ table {
         padding-top:52px;
     }
 }
+
+/* ==========================================
+   BURIAL RECORDS - CSV IMPORT / EXPORT
+========================================== */
+
+.records-toolbar{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.records-toolbar button{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    white-space:nowrap;
+}
+
+.records-toolbar button:disabled,
+.csv-import-content button:disabled{
+    opacity:.6;
+    cursor:not-allowed;
+}
+
+.csv-import-content{
+    width:min(880px, calc(100% - 32px));
+}
+
+.csv-import-summary{
+    margin:0 0 14px;
+    color:#374151;
+    font-weight:600;
+    line-height:1.5;
+}
+
+.csv-import-summary.success-text{
+    color:#14532D;
+}
+
+.csv-import-summary.error-text{
+    color:#b91c1c;
+}
+
+.csv-preview-wrap{
+    max-height:320px;
+    overflow:auto;
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    -webkit-overflow-scrolling:touch;
+}
+
+.csv-preview-table{
+    margin:0;
+    white-space:nowrap;
+    font-size:13px;
+}
+
+.csv-preview-table thead{
+    position:sticky;
+    top:0;
+    z-index:1;
+}
+
+.csv-preview-table th,
+.csv-preview-table td{
+    padding:8px 10px;
+    text-align:left;
+}
+
+.csv-preview-table tbody tr.row-invalid{
+    background:#fef2f2;
+}
+
+.csv-preview-table .row-result-ok{
+    color:#166534;
+    font-weight:600;
+}
+
+.csv-preview-table .row-result-error{
+    color:#b91c1c;
+    font-weight:600;
+    white-space:normal;
+    min-width:220px;
+}
+
+.csv-import-progress{
+    margin:12px 0 0;
+    color:#374151;
+    min-height:18px;
+}
+
+.csv-import-content .form-actions{
+    flex-wrap:wrap;
+    justify-content:flex-end;
+}
+
+@media (max-width: 768px){
+    .records-toolbar{
+        width:100%;
+    }
+
+    .records-toolbar button{
+        width:100%;
+        justify-content:center;
+    }
+
+    .csv-import-content .form-actions button{
+        width:100%;
+    }
+}

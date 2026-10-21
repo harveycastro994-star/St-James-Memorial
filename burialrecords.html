@@ -76,10 +76,21 @@
         <section class="table-section">
             <div class="table-header">
                 <h2>Burial Records</h2>
-                <button class="add-btn" id="openAddRecordBtn" type="button">
-                    <i class="fa-solid fa-plus"></i>
-                    Add Burial Record
-                </button>
+                <div class="records-toolbar">
+                    <input type="file" id="burialCsvFileInput" accept=".csv,text/csv" hidden>
+                    <button class="secondary-btn" id="importCsvBtn" type="button">
+                        <i class="fa-solid fa-file-import"></i>
+                        Import CSV
+                    </button>
+                    <button class="secondary-btn" id="exportCsvBtn" type="button">
+                        <i class="fa-solid fa-file-csv"></i>
+                        Export CSV
+                    </button>
+                    <button class="add-btn" id="openAddRecordBtn" type="button">
+                        <i class="fa-solid fa-plus"></i>
+                        Add Burial Record
+                    </button>
+                </div>
             </div>
             <div class="records-panel">
                 <div class="records-panel-header">
@@ -168,6 +179,39 @@
                     <button type="button" class="secondary-btn" id="cancelAddRecordBtn">Cancel</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div id="csvImportModal" class="modal hidden">
+        <div class="modal-content csv-import-content">
+            <div class="modal-header">
+                <h3>Import Burial Records from CSV</h3>
+                <button class="modal-close" id="closeCsvImportModal" type="button" aria-label="Close import preview">&times;</button>
+            </div>
+            <p id="csvImportSummary" class="csv-import-summary"></p>
+            <div class="csv-preview-wrap">
+                <table class="csv-preview-table">
+                    <thead>
+                        <tr>
+                            <th>Row</th>
+                            <th>Record ID</th>
+                            <th>Deceased Name</th>
+                            <th>Block</th>
+                            <th>Plot</th>
+                            <th>Date of Burial</th>
+                            <th>Status</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="csvImportPreviewBody"></tbody>
+                </table>
+            </div>
+            <p id="csvImportProgress" class="csv-import-progress" aria-live="polite"></p>
+            <div class="form-actions">
+                <button type="button" class="secondary-btn" id="downloadCsvErrorsBtn" hidden>Download failed rows</button>
+                <button type="button" class="secondary-btn" id="cancelCsvImportBtn">Cancel</button>
+                <button type="button" class="add-btn" id="confirmCsvImportBtn">Import Records</button>
+            </div>
         </div>
     </div>
 
